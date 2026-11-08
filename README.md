@@ -51,9 +51,9 @@ Hz when loaded, regardless of Region and PAL 60 Hz, until Reset Core or a new ga
 **PAL 60 Hz** – when turned on, a game that would run at 50 Hz runs at 60
 instead. Most PAL games were made for 50 Hz, so at 60 they run about a
 fifth faster. PAL games that were not made for 50 Hz run slower than
-intended and this is what the setting corrects for. Note that PAL games
-that run at 240p cannot run at 60 Hz and in this situation the core will
-start the game again at 50 Hz.
+intended and this is what the setting corrects for. Note that 240p games
+cannot run at 60 Hz and in this situation the core will start the game
+again at 50 Hz.
 
 ## Controls
 
