@@ -7,7 +7,7 @@
 - **Memories and Sleep.** Now you no longer need to complete games in a single sitting!
 - **PAL support** with the option to run European games at 50 or 60 Hz
 - **SVP chip** for playing Virtua Racing
-- **EEPROM save support** for games such Mega Man: The Wily Wars and Wonder Boy in Monster World
+- **EEPROM save support** for games such as Mega Man: The Wily Wars and Wonder Boy in Monster World
 - **Up to four players** on the Analogue Dock, through 4-Way Play, Team Player or J-Cart.
 - **The Analogizer**, for a CRT or TV and SNAC controllers.
 
@@ -24,7 +24,7 @@ this core: you'll need your own Genesis / Mega Drive ROMs.
 
 Games saves are stored `Saves/genesis/common/<game>.sav`
 
-- Saves are iswritten as 128 KB files. This is the same layout as the Spiritualized Genesis core, so game saves are compatible between the two cores
+- Saves are written as 128 KB files. This is the same layout as the Spiritualized Genesis core, so game saves are compatible between the two cores
 - 64 KB saves are read too. Note that these are then written back in the 128 KB format.
 - Cartridges with a serial EEPROM save chip store data in the same `.sav`, in the same layout.
 
@@ -37,24 +37,25 @@ The console is stopped between frames, so a Memory can be made at any point in
 play.
 
 A Memory keeps the speed it was made at. So one made at 50 Hz plays on at 50
-Hz when loaded, regardless of the PAL 60 Hz value.
+Hz when loaded, regardless of Region and PAL 60 Hz, until Reset Core or a new game, which go back to the settings.
 
-[`SAVE-STATES.md`](SAVE-STATES.md) includes more information on how saves work.
+[`SAVE-STATES.md`](SAVE-STATES.md) has more on how Memories and Sleep work.
 
 ## Region and PAL
 
-**Region** decides which console a game finds itself on:
+**Region** decides which console a game finds itself on. It and PAL 60 Hz are read as a game starts, so a change takes effect the next time a game is loaded:
 
-- **Auto** reads the region from the cartridge: United States if it names it, then Europe, then Japan. A game made for Europe runs as on a European console at 50 Hz.
+- **Auto** reads the region from the cartridge: United States if it names it, then Europe, then Japan. A game made for Europe alone runs as on a European console at 50 Hz; one that also names another region runs at 60 Hz.
 - **United States**, **Europe** or **Japan** for any game, for its language, its title or a lockout screen. Europe runs at 50 Hz.
 
 **PAL 60 Hz** – when turned on, a game that would run at 50 Hz runs at 60
-instead, still told it is on a PAL console. Most of those games were made
-for 50 Hz, so at 60 they, and their music, run about a fifth faster. Note
-that PAL games that run at 240p cannot run at 60 Hz and in this situation
-the core will automatically swap to run the game at 50 Hz.
+instead. Most PAL games were made for 50 Hz, so at 60 they run about a
+fifth faster. PAL games that were not made for 50 Hz run slower than
+intended and this is what the setting corrects for. Note that PAL games
+that run at 240p cannot run at 60 Hz and in this situation the core will
+start the game again at 50 Hz.
 
-Controls
+## Controls
 
 | Pocket | Genesis |
 | --- | --- |
@@ -98,6 +99,11 @@ Once an Analogizer is set up in `analogizer.bin`, the core drives the cartridge
 slot, as every Analogizer core does, so play with the adapter in the slot rather
 than a game cartridge. Without it set up, the slot's pins are left idle, and a
 cartridge left in the slot is fine.
+
+## Known limits
+
+- Genesis / Mega Drive cartridges only: no Sega CD, 32X or Master System games.
+- `.smd` files are not taken; convert them to `.bin` first.
 
 ## Technical details
 

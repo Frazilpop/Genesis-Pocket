@@ -13,8 +13,8 @@
 # so nothing is copied there. The platform (Platforms/genesis.json and its
 # image) is shared with the other Genesis cores. The JSON is copied only when
 # the card has none, so the card's own name stays. The image is this repo's
-# (dyreschlock's Sega Genesis banner) and is put there whenever the card's
-# differs, so those cores show it too.
+# platform banner and is put there whenever the card's differs, so those cores
+# show it too.
 #
 # One copy to the card at a time, under /tmp/pocket-card.lock (shared with
 # other cores' deploy scripts). Nothing ejects the card.

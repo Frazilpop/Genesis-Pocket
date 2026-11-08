@@ -4,10 +4,10 @@
         "metadata": {
             "platform_ids": ["genesis", "analogizer"],
             "shortname": "Genesis",
-            "description": "Sega Genesis / Mega Drive core for the Analogue Pocket",
+            "description": "Sega Genesis / Mega Drive core with save states",
             "author": "frazilpop",
             "url": "https://github.com/Frazilpop/Genesis-Pocket",
-            "version": "0.15.1",
+            "version": "1.0.0",
             "date_release": "2026-11-08"
         },
         "framework": {
