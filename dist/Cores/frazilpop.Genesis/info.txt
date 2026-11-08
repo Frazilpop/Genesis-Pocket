@@ -1,0 +1,4 @@
+Sega Genesis / Mega Drive core
+
+Based on MiSTer-devel/Genesis_MiSTer (GPL-3.0): FX68K, T80, jt12, jt89 and fpgagen's VDP.
+Analogue Pocket port by Frazilpop.

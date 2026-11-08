@@ -151,13 +151,14 @@ None of these is in the core or the repo; the scripts fetch or call them.
 
 ## Credits
 
-This core was guided by ericlewis's openFPGA-Genesis, the first Genesis core
-for the Pocket, and by work contributed to it: Shane Lynch's Reset Core and
+This core was guided by Eric Lewis's (ericlewis)
+[openFPGA-Genesis](https://github.com/opengateware/openFPGA-Genesis), the
+first Genesis core for the Pocket, and by work contributed to it: Shane Lynch's Reset Core and
 light guns, Marcus Andrade's choice of the scaler's mode by the picture's
 size, and Thomas Watson's vertical blank taken at horizontal sync. It also
 follows two forks: RndMnkIII's, which fixed how the game is held in memory and
 how it is loaded into it, and Franco Arza's arzacore, which made Multitap a
-list with J-CartMultitap a list with J-Cart.
+list with J-Cart.
 
 ## ROMs
 
