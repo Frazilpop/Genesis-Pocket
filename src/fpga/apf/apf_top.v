@@ -472,4 +472,3 @@ core_top ic (
 );
 
 endmodule
-

@@ -29,8 +29,15 @@ module jt89_tone(
     input         [9:0] tone,
     input         [3:0] vol,
     output        [8:0] snd,
-    output reg          out
+    output reg          out,
+    // save states: the counter, the output and its
+    // volume stage, read and written whole
+    output       [19:0] ss_q,
+    input               ss_we,
+    input        [19:0] ss_d
 );
+
+assign ss_q = { cnt, out, snd };
 
 reg [9:0] cnt;
 reg last_out;
@@ -41,13 +48,17 @@ jt89_vol u_vol(
     .clk_en ( clk_en  ),
     .din    ( out     ),
     .vol    ( vol     ),
-    .snd    ( snd     )
+    .snd    ( snd     ),
+    .ss_we  ( ss_we   ),
+    .ss_d   ( ss_d[8:0] )
 );
 
 always @(posedge clk) 
     if( rst ) begin
         cnt <= 10'd0;
         out <= 1'b0;
+    end else if( ss_we ) begin
+        { cnt, out } <= ss_d[19:9];
     end else if( clk_en ) begin
         if( tone==10'd0 || tone==10'd1 )    // special case. This is used for sample playing.
             out <= 1'b1;

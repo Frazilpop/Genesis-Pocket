@@ -127,7 +127,8 @@ pad_io pad1
 	.SEL(PAD_SEL && (NUM == 0)),
 	.RNW(RNW),
 	.DI(DI[6]),
-	.DO(PAD1_DO)
+	.DO(PAD1_DO),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)	// save states: 4-Way Play's pads are not saved
 );
 
 pad_io pad2
@@ -154,7 +155,8 @@ pad_io pad2
 	.SEL(PAD_SEL && (NUM == 1)),
 	.RNW(RNW),
 	.DI(DI[6]),
-	.DO(PAD2_DO)
+	.DO(PAD2_DO),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)	// save states: 4-Way Play's pads are not saved
 );
 
 pad_io pad3
@@ -181,7 +183,8 @@ pad_io pad3
 	.SEL(PAD_SEL && (NUM == 2)),
 	.RNW(RNW),
 	.DI(DI[6]),
-	.DO(PAD3_DO)
+	.DO(PAD3_DO),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)	// save states: 4-Way Play's pads are not saved
 );
 
 pad_io pad4
@@ -208,7 +211,8 @@ pad_io pad4
 	.SEL(PAD_SEL && (NUM == 3)),
 	.RNW(RNW),
 	.DI(DI[6]),
-	.DO(PAD4_DO)
+	.DO(PAD4_DO),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)	// save states: 4-Way Play's pads are not saved
 );
 
 wire PAD_SEL = SEL && (A==1); 

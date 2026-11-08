@@ -50,7 +50,15 @@ module jt12_pg(
     input               pg_stop,    // not implemented
     
     output  reg [ 4:0]  keycode_II,
-    output      [ 9:0]  phase_VIII
+    output      [ 9:0]  phase_VIII,
+    // Save states: in scan mode the phase ring and the
+    // pad turn with nothing updated, the stage II registers hold (the chain)
+    input               ss,
+    input               ss_gsh,
+    input               ss_gi,
+    output              ss_go,
+    output      [29:0]  ss_tap,
+    input       [29:0]  ss_tnew
 );
 
 parameter num_ch=6;
@@ -63,7 +71,15 @@ reg  [16:0] phinc_II;
 wire [19:0] phase_drop, phase_in;
 wire [ 9:0] phase_II;
 
-always @(posedge clk) if(clk_en) begin
+wire [27:0] ss_gv = { keycode_II, detune_mod_II, phinc_II };
+wire [27:0] ss_gn = { ss_gv[26:0], ss_gi };
+assign ss_go  = ss_gv[27];
+assign ss_tap = { phase_drop, phase_VIII };
+
+always @(posedge clk)
+if( ss_gsh )
+    { keycode_II, detune_mod_II, phinc_II } <= ss_gn;
+else if(clk_en && !ss) begin
     keycode_II      <= keycode_I;
     detune_mod_II   <= detune_mod_I;
     phinc_II        <= phinc_I;
@@ -97,7 +113,7 @@ jt12_sh_rst #( .width(20), .stages(4*num_ch) ) u_phsh(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
     .rst    ( rst       ),
-    .din    ( phase_in  ),
+    .din    ( ss ? ss_tnew[29:10] : phase_in ),
     .drop   ( phase_drop)
 );
 
@@ -105,7 +121,7 @@ jt12_sh_rst #( .width(10), .stages(6) ) u_pad(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
     .rst    ( rst       ),  
-    .din    ( phase_II  ),
+    .din    ( ss ? ss_tnew[9:0] : phase_II ),
     .drop   ( phase_VIII)
 );
 

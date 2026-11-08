@@ -37,7 +37,13 @@ module jt89(
     input          wr_n,
     input    [7:0] din,
     output  signed [10:0] sound,
-    output         ready
+    output         ready,
+    // save states: the whole chip as ten 16-bit words,
+    // ss_idx picks the word ss_q shows; ss_we writes ss_wd into it (frozen)
+    input    [3:0] ss_idx,
+    output  [15:0] ss_q,
+    input          ss_we,
+    input   [15:0] ss_wd
 );
 
 parameter interpol16=0;
@@ -73,6 +79,8 @@ always @(posedge clk )
     if( rst ) begin
         cen_16 <= 1'b1;
         cen_4  <= 1'b1;
+    end else if( ss_we ) begin
+        { cen_16, cen_4 } <= ss_new[99:98];
     end else begin
         cen_16 <= clk_en & (&clk_div);
         cen_4  <= clk_en & (&clk_div[1:0]);
@@ -81,17 +89,37 @@ always @(posedge clk )
 always @(posedge clk )
     if( rst )
         clk_div <= 4'd0;
+    else if( ss_we )
+        clk_div <= ss_new[103:100];
     else if( clk_en )
         clk_div <= clk_div + 1'b1;
 
 reg clr_noise, last_wr;
 wire [2:0] reg_sel = din[7] ? din[6:4] : regn;
 
+// The state, 156 bits: the registers, the divider and its enables, the write
+// edge, then the three tones and the noise with their volume stages. A word
+// written goes in by putting it into the whole vector as it is now.
+wire [ 19:0] ss_t0, ss_t1, ss_t2;
+wire [ 35:0] ss_n;
+wire [159:0] ss_all = { 4'd0, tone0, tone1, tone2, vol0, vol1, vol2, vol3, ctrl3, regn,
+                        clk_div, cen_16, cen_4, clr_noise, last_wr, ss_t0, ss_t1, ss_t2, ss_n };
+reg  [159:0] ss_new;
+always @(*) begin
+    ss_new = ss_all;
+    ss_new[ (9-ss_idx)*16 +: 16 ] = ss_wd;
+end
+assign ss_q = ss_all[ (9-ss_idx)*16 +: 16 ];
+
 always @(posedge clk)
     if( rst ) begin
         { vol0, vol1, vol2, vol3 } <= {16{1'b1}};
         { tone0, tone1, tone2 } <= 30'd0;
         ctrl3 <= 3'b100;
+    end
+    else if( ss_we ) begin
+        { tone0, tone1, tone2, vol0, vol1, vol2, vol3, ctrl3, regn } <= ss_new[155:104];
+        { clr_noise, last_wr } <= ss_new[97:96];
     end
     else begin
         last_wr <= wr_n;
@@ -120,6 +148,9 @@ jt89_tone u_tone0(
     .vol    ( vol0      ),
     .tone   ( tone0     ),
     .snd    ( ch0       ),
+    .ss_q   ( ss_t0     ),
+    .ss_we  ( ss_we     ),
+    .ss_d   ( ss_new[95:76] ),
     .out    (           )
 );
 
@@ -130,6 +161,9 @@ jt89_tone u_tone1(
     .vol    ( vol1      ),
     .tone   ( tone1     ),
     .snd    ( ch1       ),
+    .ss_q   ( ss_t1     ),
+    .ss_we  ( ss_we     ),
+    .ss_d   ( ss_new[75:56] ),
     .out    (           )
 );
 
@@ -142,6 +176,9 @@ jt89_tone u_tone2(
     .vol    ( vol2      ),
     .tone   ( tone2     ),
     .snd    ( ch2       ),
+    .ss_q   ( ss_t2     ),
+    .ss_we  ( ss_we     ),
+    .ss_d   ( ss_new[55:36] ),
     .out    ( out2      )
 );
 
@@ -153,7 +190,10 @@ jt89_noise u_noise(
     .vol    ( vol3      ),
     .ctrl3  ( ctrl3     ),
     .tone2  ( tone2     ),
-    .snd    ( noise     )
+    .snd    ( noise     ),
+    .ss_q   ( ss_n      ),
+    .ss_we  ( ss_we     ),
+    .ss_d   ( ss_new[35:0] )
 );
 
 endmodule

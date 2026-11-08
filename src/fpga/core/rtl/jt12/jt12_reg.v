@@ -101,7 +101,16 @@ module jt12_reg(
     output              amsen_IV,
 
     // envelope operation
-    output          keyon_I
+    output          keyon_I,
+    // Save states: ss is the scan mode, ss_gsh moves
+    // the chain on; the loops' taps: the operator rings, the channel rings,
+    // RL and the key-on ring
+    input           ss,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go,
+    output  [71:0]  ss_tap,
+    input   [71:0]  ss_tnew
 );
 
 parameter num_ch=6; // Use only 3 (YM2203/YM2610) or 6 (YM2612/YM2608)
@@ -136,10 +145,18 @@ wire [4:0] cur  = {  cur_op,  cur_ch };
 
 wire [2:0] fb_I;
 
-always @(posedge clk) if( clk_en ) begin
-    fb_II <= fb_I;
-    ch6op <= next_ch==3'd6;
-end 
+// Save states: the slot counter moves on with the scan's steps; on the chain
+// with fb_II and ch6op, which hold, then jt12_kon's
+wire [9:0] ss_gv = { cur_op, cur_ch, zero, fb_II, ch6op };
+wire [9:0] ss_gn = { ss_gv[8:0], ss_gi };
+
+always @(posedge clk)
+    if( ss_gsh )
+        { fb_II, ch6op } <= ss_gn[3:0];
+    else if( clk_en && !ss ) begin
+        fb_II <= fb_I;
+        ch6op <= next_ch==3'd6;
+    end 
 
 // FNUM and BLOCK
 wire    [10:0]  fnum_I_raw;
@@ -211,7 +228,9 @@ always @(*) begin
 end
 
 always @(posedge clk) begin : up_counter
-    if( clk_en ) begin
+    if( ss_gsh )
+        { cur_op, cur_ch, zero } <= ss_gn[9:4];
+    else if( clk_en ) begin
         { cur_op, cur_ch }  <= { next_op, next_ch };
         zero    <= next == 5'd0;
     end
@@ -230,8 +249,14 @@ jt12_kon #(.num_ch(num_ch)) u_kon(
     .csm        ( csm       ),
     // .flag_A      ( flag_A    ),
     .overflow_A ( overflow_A),
-    
-    .keyon_I    ( keyon_I   )
+
+    .keyon_I    ( keyon_I   ),
+    .ss         ( ss        ),
+    .ss_gsh     ( ss_gsh    ),
+    .ss_gi      ( ss_gv[9]  ),
+    .ss_go      ( ss_go     ),
+    .ss_tap     ( ss_tap[0] ),
+    .ss_tnew    ( ss_tnew[0])
 );
 
 jt12_mod #(.num_ch(num_ch)) u_mod(
@@ -272,8 +297,12 @@ generate
             .up_ssgeg       ( up_ssgeg      ),  
             .update_op_I    ( update_op_I   ),
             .update_op_II   ( update_op_II  ),
-            .update_op_IV   ( update_op_IV  )
+            .update_op_IV   ( update_op_IV  ),
+            // Save states: the ring's tap is here, at its entry
+            .ss             ( ss            ),
+            .ss_din         ( ss_tnew[71:28])
         );
+        assign ss_tap[71:28] = shift_out;
 
         wire up_midop_I  = { ~cur[4], cur[3:0] } == req_opch_I;
         wire up_midop_II = { ~cur[4], cur[3:0] } == req_opch_II;
@@ -296,7 +325,9 @@ generate
             // update in the middle:
             .update_op_I    ( up_midop_I    ),
             .update_op_II   ( up_midop_II   ),
-            .update_op_IV   ( up_midop_IV   )
+            .update_op_IV   ( up_midop_IV   ),
+            .ss             ( ss            ),
+            .ss_din         ( shift_middle  )
         );
     end
     else begin // YM2203 only has one CSR
@@ -316,8 +347,11 @@ generate
             .up_ssgeg       ( up_ssgeg      ),  
             .update_op_I    ( update_op_I   ),
             .update_op_II   ( update_op_II  ),
-            .update_op_IV   ( update_op_IV  )
+            .update_op_IV   ( update_op_IV  ),
+            .ss             ( ss            ),
+            .ss_din         ( ss_tnew[71:28])
         );
+        assign ss_tap[71:28] = shift_out;
     end // else
 endgenerate
 
@@ -343,11 +377,13 @@ wire [regch_width-1:0] regch_in = {
 assign {    block_I_raw, fnum_I_raw, 
             fb_I, alg_I, ams_IV, pms_I } = regch_out;
 
+assign ss_tap[27:3] = regch_out;
+
 jt12_sh_rst #(.width(regch_width),.stages(num_ch)) u_regch(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
     .rst    ( rst       ),
-    .din    ( regch_in  ),
+    .din    ( ss ? ss_tnew[27:3] : regch_in ),
     .drop   ( regch_out )
 );
 
@@ -360,12 +396,13 @@ if( num_ch==6 ) begin
         .clk    ( clk       ),
         .clk_en ( clk_en    ),
         .rst    ( rst       ),
-        .din    ( up_pms_ch ? rl_in :  rl   ),
+        .din    ( ss ? ss_tnew[2:1] : (up_pms_ch ? rl_in :  rl) ),
         .drop   ( rl    )
     );
 end else begin // YM2203 has no stereo output
     assign rl=2'b11;
 end
+assign ss_tap[2:1] = rl;
     
 endgenerate
 `endif

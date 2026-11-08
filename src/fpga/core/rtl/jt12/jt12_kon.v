@@ -34,8 +34,15 @@ module jt12_kon(
     input           csm,
     // input            flag_A,
     input           overflow_A,
-
-    output  reg     keyon_I
+    output  reg     keyon_I,
+    // Save states: in scan mode the key-on ring turns
+    // with nothing updated, the rest hold and are on the chain
+    input           ss,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go,
+    output          ss_tap,
+    input           ss_tnew
 );
 
 parameter num_ch=6;
@@ -47,8 +54,19 @@ if(num_ch==6) begin
     // capture overflow signal so it lasts long enough
     reg overflow2;
     reg [4:0] overflow_cycle;
+    reg        up_keyon_reg;
+    reg  [3:0] tkeyon_op;
+    reg  [2:0] tkeyon_ch;
 
-    always @(posedge clk) if( clk_en ) begin
+    wire [14:0] ss_gv = { overflow2, overflow_cycle, keyon_I, up_keyon_reg, tkeyon_op, tkeyon_ch };
+    wire [14:0] ss_gn = { ss_gv[13:0], ss_gi };
+    assign ss_go  = ss_gv[14];
+    assign ss_tap = csr_out;
+
+    always @(posedge clk)
+    if( ss_gsh )
+        { overflow2, overflow_cycle } <= ss_gn[14:9];
+    else if( clk_en && !ss ) begin
         if(overflow_A) begin
             overflow2 <= 1'b1;
             overflow_cycle <= { next_op, next_ch };
@@ -57,17 +75,20 @@ if(num_ch==6) begin
         end
     end
 
-    always @(posedge clk) if( clk_en )
+    always @(posedge clk)
+    if( ss_gsh )
+        keyon_I <= ss_gn[8];
+    else if( clk_en && !ss )
         keyon_I <= (csm&&next_ch==3'd2&&overflow2) || csr_out;
 
-    reg        up_keyon_reg;
-    reg  [3:0] tkeyon_op;
-    reg  [2:0] tkeyon_ch;
     wire       key_upnow;
 
     assign key_upnow = up_keyon_reg && (tkeyon_ch==next_ch) && (next_op == 2'd3);
 
-    always @(posedge clk) if( clk_en ) begin
+    always @(posedge clk)
+    if( ss_gsh )
+        { up_keyon_reg, tkeyon_op, tkeyon_ch } <= ss_gn[7:0];
+    else if( clk_en && !ss ) begin
         if (rst)
             up_keyon_reg <= 1'b0;
         if (up_keyon) begin
@@ -82,10 +103,10 @@ if(num_ch==6) begin
     wire middle1;
     wire middle2;
     wire middle3;
-    wire din      = key_upnow ? tkeyon_op[3] : csr_out;
-    wire mid_din2 = key_upnow ? tkeyon_op[1] : middle1;
-    wire mid_din3 = key_upnow ? tkeyon_op[2] : middle2;
-    wire mid_din4 = key_upnow ? tkeyon_op[0] : middle3;
+    wire din      = ss ? ss_tnew : key_upnow ? tkeyon_op[3] : csr_out;
+    wire mid_din2 = ss ? middle1 : key_upnow ? tkeyon_op[1] : middle1;
+    wire mid_din3 = ss ? middle2 : key_upnow ? tkeyon_op[2] : middle2;
+    wire mid_din4 = ss ? middle3 : key_upnow ? tkeyon_op[0] : middle3;
 
     jt12_sh_rst #(.width(1),.stages(6),.rstval(1'b0)) u_konch0(
         .clk    ( clk       ),
@@ -143,6 +164,8 @@ else begin // 3 channels
         .din    ( din       ),
         .drop   ( csr_out   )
     );
+    assign ss_go  = ss_gi; // the YM2203's: no save states
+    assign ss_tap = 1'b0;
 end
 endgenerate
 

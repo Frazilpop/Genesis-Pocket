@@ -31,7 +31,24 @@ entity SSP160x is
 		BLIND_RD		: out std_logic;
 		BLIND_WR		: out std_logic;
 
-		INST_NON		: out std_logic
+		INST_NON		: out std_logic;
+
+		-- Save states, the SSP's part of the chain: SS_SH
+		-- moves every register along by a word, SS_SI in at the tail, the PC out.
+		-- SS_POS_I/O: the stack's position, which SVP.vhd holds a place for in its word.
+		-- SS_EN: stopped, and the two RAMs at SS_A, written from SS_D.
+		SS_SH			: in std_logic := '0';
+		SS_SI			: in std_logic_vector(15 downto 0) := (others => '0');
+		SS_SO			: out std_logic_vector(15 downto 0);
+		SS_POS_I		: in std_logic_vector(2 downto 0) := (others => '0');
+		SS_POS_O		: out std_logic_vector(2 downto 0);
+		SS_EN			: in std_logic := '0';
+		SS_A			: in std_logic_vector(7 downto 0) := (others => '0');
+		SS_D			: in std_logic_vector(15 downto 0) := (others => '0');
+		SS_RA_WE		: in std_logic := '0';
+		SS_RB_WE		: in std_logic := '0';
+		SS_RA_Q		: out std_logic_vector(15 downto 0);
+		SS_RB_Q		: out std_logic_vector(15 downto 0)
 	);
 end SSP160x;
 
@@ -287,6 +304,11 @@ begin
 				
 				IR_SAVED <= IR;
 			end if;
+			if SS_SH = '1' then
+				IMM16_EXT_CYCLE <= STACK(0)(11);
+				IND_EXT_CYCLE <= STACK(0)(10);
+				IR_SAVED <= IND_ADDR;
+			end if;
 		end if;
 	end process;
 	
@@ -421,6 +443,12 @@ begin
 					FLAG_OV <= '0';
 				end if;
 			end if;
+			if SS_SH = '1' then
+				FLAG_N <= STACK(0)(15);
+				FLAG_OV <= STACK(0)(14);
+				FLAG_Z <= STACK(0)(13);
+				FLAG_L <= STACK(0)(12);
+			end if;
 		end if;
 	end process;
 	
@@ -456,6 +484,9 @@ begin
 					end if;
 				end if;
 			end if;
+			if SS_SH = '1' then
+				A <= A(15 downto 0) & X;
+			end if;
 		end if;
 	end process;
 	
@@ -477,6 +508,10 @@ begin
 						Y <= SRC_DATA;
 					end if;
 				end if;
+			end if;
+			if SS_SH = '1' then
+				X <= Y;
+				Y <= FLAG_N & FLAG_OV & FLAG_Z & FLAG_L & IMM16_EXT_CYCLE & IND_EXT_CYCLE & MACS & OP & IE & ST6 & ST5 & RB & RPL;
 			end if;
 		end if;
 	end process;
@@ -528,6 +563,16 @@ begin
 					STACK_POS <= NEXT_STACK_POS;
 				end if;
 			end if;
+			if SS_SH = '1' then
+				PC <= A(31 downto 16);
+				STACK(0) <= STACK(1);
+				STACK(1) <= STACK(2);
+				STACK(2) <= STACK(3);
+				STACK(3) <= STACK(4);
+				STACK(4) <= STACK(5);
+				STACK(5) <= PREG(0) & PREG(1);
+				STACK_POS <= unsigned(SS_POS_I);
+			end if;
 		end if;
 	end process;
 	
@@ -560,6 +605,15 @@ begin
 				elsif INST.IT = IT_SETI then
 					IE <= '1';
 				end if;
+			end if;
+			if SS_SH = '1' then
+				MACS <= STACK(0)(9);
+				OP <= STACK(0)(8);
+				IE <= STACK(0)(7);
+				ST6 <= STACK(0)(6);
+				ST5 <= STACK(0)(5);
+				RB <= STACK(0)(4 downto 3);
+				RPL <= STACK(0)(2 downto 0);
 			end if;
 		end if;
 	end process;
@@ -668,6 +722,16 @@ begin
 					end if;
 				end if;
 			end if;
+			if SS_SH = '1' then
+				PREG(0) <= PREG(2);
+				PREG(1) <= PREG(3);
+				PREG(2) <= PREG(4);
+				PREG(3) <= PREG(5);
+				PREG(4) <= PREG(6);
+				PREG(5) <= PREG(7);
+				PREG(6) <= IR_SAVED(15 downto 8);
+				PREG(7) <= IR_SAVED(7 downto 0);
+			end if;
 		end if;
 	end process;
 	
@@ -688,12 +752,15 @@ begin
 					IND_ADDR <= A(31 downto 16);
 				end if;
 			end if;
+			if SS_SH = '1' then
+				IND_ADDR <= SS_SI;
+			end if;
 		end if;
 	end process;
 
-	RAMA_ADDR <= IR(7 downto 0) when INST.AS = IA_RAM or INST.AD = IA_RAM else RAMA_PTR;
-	RAMA_D <= std_logic_vector(unsigned(RAMA_Q) + 1) when INST.AS = IA_INDPTR else SRC_DATA;
-	RAMA_WE <= INST.RAM(0) and LAST_CYCLE and EN when INST.AD = IA_RAM or INST.AD = IA_PTR or INST.AS = IA_INDPTR else '0';
+	RAMA_ADDR <= SS_A when SS_EN = '1' else IR(7 downto 0) when INST.AS = IA_RAM or INST.AD = IA_RAM else RAMA_PTR;
+	RAMA_D <= SS_D when SS_EN = '1' else std_logic_vector(unsigned(RAMA_Q) + 1) when INST.AS = IA_INDPTR else SRC_DATA;
+	RAMA_WE <= SS_RA_WE when SS_EN = '1' else INST.RAM(0) and LAST_CYCLE and EN when INST.AD = IA_RAM or INST.AD = IA_PTR or INST.AS = IA_INDPTR else '0';
 	RAMA : entity work.mlab generic map(8, 16)
 	port map(
 		clock			=> CLK,
@@ -704,9 +771,9 @@ begin
 		q				=> RAMA_Q
 	);
 	
-	RAMB_ADDR <= IR(7 downto 0) when INST.AS = IA_RAM or INST.AD = IA_RAM else RAMB_PTR;
-	RAMB_D <= std_logic_vector(unsigned(RAMB_Q) + 1) when INST.AS = IA_INDPTR else SRC_DATA;
-	RAMB_WE <= INST.RAM(1) and LAST_CYCLE and EN when INST.AD = IA_RAM or INST.AD = IA_PTR or INST.AS = IA_INDPTR else '0';
+	RAMB_ADDR <= SS_A when SS_EN = '1' else IR(7 downto 0) when INST.AS = IA_RAM or INST.AD = IA_RAM else RAMB_PTR;
+	RAMB_D <= SS_D when SS_EN = '1' else std_logic_vector(unsigned(RAMB_Q) + 1) when INST.AS = IA_INDPTR else SRC_DATA;
+	RAMB_WE <= SS_RB_WE when SS_EN = '1' else INST.RAM(1) and LAST_CYCLE and EN when INST.AD = IA_RAM or INST.AD = IA_PTR or INST.AS = IA_INDPTR else '0';
 	RAMB : entity work.mlab generic map(8, 16)
 	port map(
 		clock			=> CLK,
@@ -718,6 +785,11 @@ begin
 	);
 
 	
+	SS_RA_Q <= RAMA_Q;
+	SS_RB_Q <= RAMB_Q;
+	SS_SO <= PC;
+	SS_POS_O <= std_logic_vector(STACK_POS);
+
 	PA <= IND_ADDR when IND_EXT_CYCLE = '1' else PC;
 	
 	EA <= INST.Y(2 downto 0) when INST.AS = IA_REGY and INST.Y(3) = '1' else INST.X(2 downto 0);

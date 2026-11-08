@@ -29,7 +29,11 @@ module jt12_div(
     output reg      clk_en_ssg,
     output reg      clk_en_666,  // 666 kHz
     output reg      clk_en_111,  // 111 kHz
-    output reg      clk_en_55    //  55 kHz
+    output reg      clk_en_55,   //  55 kHz
+    // Save states: the counters on the scan's chain
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go
 );
 
 parameter use_ssg=0;
@@ -119,9 +123,16 @@ always @(posedge clk)
         div2 <= div2==2'b10 ? 2'b00 : (div2+2'b01);
     end
 
+// Save states: the chain moves on a bit at each ss_gsh (cen is low)
+wire [14:0] ss_gv = { opn_cnt, adpcm_cnt666, adpcm_cnt111, adpcm_cnt55 };
+wire [14:0] ss_gn = { ss_gv[13:0], ss_gi };
+assign ss_go = ss_gv[14];
+
 // OPN
 always @(posedge clk)
-    if( cen ) begin
+    if( ss_gsh )
+        opn_cnt <= ss_gn[14:11];
+    else if( cen ) begin
         if( opn_cnt == opn_pres ) begin
             opn_cnt <= 4'd0;  
         end
@@ -139,7 +150,9 @@ always @(posedge clk)
 
 // ADPCM-A
 always @(posedge clk)
-    if( cen ) begin
+    if( ss_gsh )
+        { adpcm_cnt666, adpcm_cnt111, adpcm_cnt55 } <= ss_gn[10:0];
+    else if( cen ) begin
         adpcm_cnt666 <= adpcm_cnt666==5'd11 ? 5'd0 : adpcm_cnt666 + 5'd1;
         if( adpcm_cnt666==5'd0 ) begin
             adpcm_cnt111 <= adpcm_cnt111==3'd5 ? 3'd0 : adpcm_cnt111+3'd1;

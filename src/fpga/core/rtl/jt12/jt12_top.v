@@ -65,7 +65,28 @@ module jt12_top (
     output  signed  [15:0] snd_left,  // FM+PSG
     output                 snd_sample,
     input           [ 7:0] debug_bus,
-    output          [ 7:0] debug_view
+    output          [ 7:0] debug_view,
+    // Save states. With cen held low and
+    // ss_scan high the chip is frozen and steps only on ss_step: a slot with
+    // nothing updated, so its 24-slot loops turn and 24 steps bring them back.
+    // Their taps, 180 bits, are shown 16 at a time by ss_lane; with ss_load
+    // a step writes the lane's bits from ss_wd. Everything else holds and is
+    // read and written as one chain of SS_CHAIN bits, a bit at each ss_gsh:
+    // in at ss_gi, out at ss_go (fed back to keep it). The YM2612's only
+    // (use_pcm 1, use_adpcm 0).
+    input                  ss_scan,
+    input                  ss_step,
+    input           [ 3:0] ss_lane,
+    input                  ss_load,
+    input           [15:0] ss_wd,
+    output          [15:0] ss_tap,
+    input                  ss_gsh,
+    input                  ss_gi,
+    output                 ss_go,
+    // where the chip is, for the save logic's freeze (halfway through a
+    // sample: three clocks after the clock enable seen with slot 12)
+    output          [ 4:0] ss_slot,
+    output                 ss_cen
 );
 
 // parameters to select the features for each chip type
@@ -167,6 +188,33 @@ wire [ 6:0] flag_ctl;
 wire [ 1:0] div_setting;
 
 wire clk_en_2, clk_en_666, clk_en_111, clk_en_55;
+
+// Save states: the loops' taps (ss_t) and what each takes in scan mode
+// (ss_n: itself, or the lane being written), and the chain (ss_c), which
+// runs through the prescaler and registers, the timers, the LFO, the phase
+// and envelope generators, the operator, the accumulators and the PCM
+localparam SS_CHAIN = 603;
+wire [191:0] ss_t, ss_n;
+wire [ 71:0] ss_reg_t;
+wire [ 29:0] ss_pg_t;
+wire [ 15:0] ss_eg_t;
+wire [ 51:0] ss_op_t;
+wire [  8:0] ss_c;
+
+assign ss_t = { 12'd0, ss_pg_t, ss_eg_t, eg_IX, ss_op_t, ss_reg_t };
+assign ss_c[0] = ss_gi;
+assign ss_go   = ss_c[8];
+assign ss_slot = { cur_op, cur_ch };
+assign ss_cen  = clk_en;
+
+genvar ss_l;
+generate
+    for( ss_l=0; ss_l<12; ss_l=ss_l+1 ) begin : ss_lanes
+        assign ss_n[ss_l*16 +: 16] = ss_load && ss_lane==ss_l ? ss_wd : ss_t[ss_l*16 +: 16];
+    end
+endgenerate
+wire [255:0] ss_t_all = { 64'd0, ss_t };
+assign ss_tap = ss_t_all[ ss_lane*16 +: 16 ];
 
 assign debug_view = { 4'd0, flag_B, flag_A, div_setting };
 
@@ -395,7 +443,14 @@ jt12_mmr #(.use_ssg(use_ssg),.num_ch(num_ch),.use_pcm(use_pcm), .use_adpcm(use_a
     .psg_data   ( psg_data  ),
     .psg_wr_n   ( psg_wr_n  ),
     .debug_bus  ( debug_bus ),
-    .div_setting(div_setting)
+    .div_setting(div_setting),
+    .ss         ( ss_scan   ),
+    .ss_step    ( ss_step   ),
+    .ss_gsh     ( ss_gsh    ),
+    .ss_gi      ( ss_c[0]   ),
+    .ss_go      ( ss_c[1]   ),
+    .ss_tap     ( ss_reg_t  ),
+    .ss_tnew    ( ss_n[71:0])
 );
 
 /* verilator tracing_on */
@@ -418,7 +473,11 @@ jt12_timers #(.num_ch(num_ch)) u_timers (
     .flag_A     ( flag_A        ),
     .flag_B     ( flag_B        ),
     .overflow_A ( overflow_A    ),
-    .irq_n      ( irq_n         )
+    .irq_n      ( irq_n         ),
+    .ss         ( ss_scan       ),
+    .ss_gsh     ( ss_gsh        ),
+    .ss_gi      ( ss_c[1]       ),
+    .ss_go      ( ss_c[2]       )
 );
 
 // YM2203 does not have LFO
@@ -436,10 +495,15 @@ if( use_lfo== 1) begin : gen_lfo
         `endif
         .lfo_en     ( lfo_en    ),
         .lfo_freq   ( lfo_freq  ),
-        .lfo_mod    ( lfo_mod   )
+        .lfo_mod    ( lfo_mod   ),
+        .ss         ( ss_scan   ),
+        .ss_gsh     ( ss_gsh    ),
+        .ss_gi      ( ss_c[2]   ),
+        .ss_go      ( ss_c[3]   )
     );
 end else begin : gen_nolfo
     assign lfo_mod = 7'd0;
+    assign ss_c[3] = ss_c[2];
 end
 endgenerate
 
@@ -511,7 +575,13 @@ jt12_pg #(.num_ch(num_ch)) u_pg(
     .pg_rst_II  ( pg_rst_II     ),
     .pg_stop    ( pg_stop       ),
     .keycode_II ( keycode_II    ),
-    .phase_VIII ( phase_VIII    )
+    .phase_VIII ( phase_VIII    ),
+    .ss         ( ss_scan       ),
+    .ss_gsh     ( ss_gsh        ),
+    .ss_gi      ( ss_c[3]       ),
+    .ss_go      ( ss_c[4]       ),
+    .ss_tap     ( ss_pg_t       ),
+    .ss_tnew    ( ss_n[179 -: 30]  )
 );
 
 wire [9:0] eg_V;
@@ -542,13 +612,19 @@ jt12_eg #(.num_ch(num_ch)) u_eg(
     .amsen_IV       ( amsen_IV      ),
 
     .eg_V           ( eg_V          ),
-    .pg_rst_II      ( pg_rst_II     )
+    .pg_rst_II      ( pg_rst_II     ),
+    .ss             ( ss_scan       ),
+    .ss_gsh         ( ss_gsh        ),
+    .ss_gi          ( ss_c[4]       ),
+    .ss_go          ( ss_c[5]       ),
+    .ss_tap         ( ss_eg_t       ),
+    .ss_tnew        ( ss_n[149 -: 16] )
 );
 
 jt12_sh #(.width(10),.stages(4)) u_egpad(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
-    .din    ( eg_V      ),
+    .din    ( ss_scan ? ss_n[133 -: 10] : eg_V ),
     .drop   ( eg_IX     )
 );
 
@@ -573,7 +649,13 @@ jt12_op #(.num_ch(num_ch)) u_op(
     .yuse_prev2     ( yuse_prev2    ),
     .zero           ( zero          ),
     .op_result      ( op_result     ),
-    .full_result    ( op_result_hd  )
+    .full_result    ( op_result_hd  ),
+    .ss             ( ss_scan       ),
+    .ss_gsh         ( ss_gsh        ),
+    .ss_gi          ( ss_c[5]       ),
+    .ss_go          ( ss_c[6]       ),
+    .ss_tap         ( ss_op_t       ),
+    .ss_tnew        ( ss_n[123 -: 52] )
 );
 `else
 assign op_result    = 'd0;
@@ -629,11 +711,22 @@ generate
             .cen55 ( clk_en_55      ),
             .pcm_wr( pcm_wr         ),
             .pcmin ( {pcm[8],pcm, 1'b0}    ),
-            .pcmout( pcm_full       )
+            .pcmout( pcm_full       ),
+            .ss    ( ss_scan        ),
+            .ss_gsh( ss_gsh         ),
+            .ss_gi ( ss_c[7]        ),
+            .ss_go ( ss_c[8]        )
         );
         `else
         assign pcm2 = pcm;
+        assign ss_c[8] = ss_c[7];
         `endif
+
+        // Save states: the six accumulators in use on the chain (cur_ch is
+        // never 3)
+        wire [7:0] ss_acc, ss_acc_go;
+        assign ss_acc[0] = ss_c[6];
+        assign ss_c[7]   = ss_acc[7];
 
         for (i = 0; i < 7; i = i + 1) begin : accumulator_block
         jt12_acc u_acc(
@@ -659,9 +752,17 @@ generate
             // .left       ( fm_snd_left [15:4]  ),
             // .right      ( fm_snd_right[15:4]  )
             .left       ( accum_l[i]),
-            .right      ( accum_r[i])
+            .right      ( accum_r[i]),
+            .ss         ( ss_scan   ),
+            .ss_gsh     ( i==3 ? 1'b0 : ss_gsh ),
+            .ss_gi      ( ss_acc[i] ),
+            .ss_go      ( ss_acc_go[i] )
         );
+        assign ss_acc[i+1] = i==3 ? ss_acc[i] : ss_acc_go[i];
         end
+    end
+    if( use_pcm!=1 ) begin : gen_ss_nopcm // no save states but the YM2612's
+        assign ss_c[8:7] = {2{ss_c[6]}};
     end
     if( use_pcm==0 && use_adpcm==0 ) begin : gen_2203_acc // YM2203 accumulator
         wire signed [15:0] mono_snd;

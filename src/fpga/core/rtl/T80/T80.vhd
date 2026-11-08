@@ -121,7 +121,18 @@ entity T80 is
 		REG        : out std_logic_vector(211 downto 0); -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
 
 		DIRSet     : in  std_logic := '0';
-		DIR        : in  std_logic_vector(211 downto 0) := (others => '0') -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
+		DIR        : in  std_logic_vector(211 downto 0) := (others => '0'); -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
+
+		-- Save states. SS_Park stops the Z80 at
+		-- the end of an instruction as a bus request does, but only where
+		-- InstEnd says the machine cycle ending ends an instruction with nothing
+		-- left for the next one: no prefix, no register write-back due in the
+		-- next M1's T1, not HALT itself. REGX and DIRX are what DIR leaves out:
+		-- BusReq_s, BusAck, Halt_FF, WZ (loaded with DIRSet).
+		SS_Park    : in  std_logic := '0';
+		InstEnd    : out std_logic;
+		REGX       : out std_logic_vector(18 downto 0);
+		DIRX       : in  std_logic_vector(18 downto 0) := (others => '0')
 	);
 end T80;
 
@@ -203,6 +214,8 @@ architecture rtl of T80 is
 	signal Save_ALU_r           : std_logic;
 	signal PreserveC_r          : std_logic;
 	signal MCycles              : std_logic_vector(2 downto 0);
+	-- InstEnd's value, read below (VHDL-93 cannot read an out port; Quartus is 93)
+	signal InstEnd_i            : std_logic;
 
 	-- Micro code outputs
 	signal MCycles_d            : std_logic_vector(2 downto 0);
@@ -357,6 +370,14 @@ begin
 
 	ClkEn <= CEN and not BusAck;
 
+	InstEnd <= InstEnd_i;
+	InstEnd_i <= '1' when ((MCycle = MCycles) or No_BTR = '1' or (MCycle = "010" and I_DJNZ = '1' and IncDecZ = '1'))
+						and NextIs_XY_Fetch = '0' and MCycle /= "110" and MCycle /= "111"
+						and ISet = "00" and XY_State = "00" and Prefix = "00"
+						and Read_To_Reg = '0' and Read_To_Acc = '0' and Save_ALU = '0'
+						and I_BT = '0' and I_BC = '0' and I_BTR = '0' and Halt = '0' else '0';
+	REGX <= BusReq_s & BusAck & Halt_FF & WZ;
+
 	T_Res <= '1' when TState = unsigned(TStates) else '0';
 
 	NextIs_XY_Fetch <= '1' when XY_State /= "00" and XY_Ind = '0' and
@@ -415,6 +436,7 @@ begin
 				PC  <= unsigned(DIR(79 downto 64));
 				A   <= DIR(79 downto 64);
 				IStatus <= DIR(209 downto 208);
+				WZ  <= DIRX(15 downto 0);
 
 			elsif ClkEn = '1' then
 				ALU_Op_r <= "0000";
@@ -1079,6 +1101,9 @@ begin
 			if DIRSet = '1' then
 				IntE_FF2 <= DIR(211);
 				IntE_FF1 <= DIR(210);
+				Halt_FF <= DIRX(16);
+				BusAck <= DIRX(17);
+				BusReq_s <= DIRX(18);
 			else
 				if NMI_n = '0' and OldNMI_n = '1' then
 					NMI_s <= '1';
@@ -1118,7 +1143,7 @@ begin
 					if MCycle = "001" and TState = 2 and Wait_n = '1' then
 						M1_n <= '1';
 					end if;
-					if BusReq_s = '1' and BusAck = '1' then
+					if BusAck = '1' and (BusReq_s = '1' or (SS_Park = '1' and InstEnd_i = '1')) then
 					else
 						BusAck <= '0';
 						if TState = 2 and Wait_n = '0' then
@@ -1126,7 +1151,7 @@ begin
 							if Halt = '1' then
 								Halt_FF <= '1';
 							end if;
-							if BusReq_s = '1' then
+							if BusReq_s = '1' or (SS_Park = '1' and InstEnd_i = '1') then
 								BusAck <= '1';
 							else
 								TState <= "001";

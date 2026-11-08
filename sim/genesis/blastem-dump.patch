@@ -1,0 +1,120 @@
+--- a/genesis.c	2026-11-03 18:50:48
++++ b/genesis.c	2026-11-03 18:50:48
+@@ -513,7 +513,9 @@
+ }
+ 
+ #define REFRESH_INTERVAL 128
+-#define REFRESH_DELAY 2
++//Genesis-Pocket: BLASTEM_REFRESH=0 runs with no refresh wait
++static int refresh_delay_value(void) { static int v = -1; if (v < 0) { const char *e = getenv("BLASTEM_REFRESH"); v = e ? atoi(e) : 2; } return v; }
++#define REFRESH_DELAY refresh_delay_value()
+ 
+ void gen_update_refresh(m68k_context *context)
+ {
+--- a/vdp.c	2026-11-03 18:50:48
++++ b/vdp.c	2026-11-03 18:50:48
+@@ -3046,11 +3046,104 @@
+ 	render_framebuffer_updated(context->cur_buffer, context->h40_lines > context->output_lines / 2 ? LINEBUF_SIZE : (256+HORIZ_BORDER));
+ 	context->fb = render_get_framebuffer(context->cur_buffer, &context->output_pitch);
+ 	vdp_update_per_frame_debug(context);
++}
++
++//Genesis-Pocket's tools/blastem-frames.sh: every frame's active picture as the
++//sim's frames.txt has it (a line: number, WxH, CRC-32 of 0x00RRGGBB little-endian
++//words), numbered as the sim numbers them (the sim's frame N is BlastEm's N - 1).
++//BLASTEM_DUMP the folder, BLASTEM_FRAMES where to stop, BLASTEM_KEEP a comma list
++//of frames (or "all") to write as PNGs, BLASTEM_VRAM a frame to write VRAM, the
++//registers and the sprite cache of.
++#include <zlib.h>
++static void gp_chunk(FILE *f, const char *type, const uint8_t *d, uint32_t n)
++{
++	uint8_t b[4] = {n >> 24, n >> 16, n >> 8, n};
++	fwrite(b, 1, 4, f);
++	fwrite(type, 1, 4, f);
++	fwrite(d, 1, n, f);
++	uLong c = crc32(crc32(0, (const Bytef *)type, 4), d, n);
++	uint8_t e[4] = {c >> 24, c >> 16, c >> 8, c};
++	fwrite(e, 1, 4, f);
++}
++
++static void gp_png(const char *path, const uint32_t *px, int w, int h)
++{
++	uLong raw_n = (w * 3 + 1) * h, z_n = compressBound(raw_n);
++	uint8_t *raw = malloc(raw_n), *z = malloc(z_n), *p = raw;
++	for (int y = 0; y < h; y++) {
++		*p++ = 0;
++		for (int x = 0; x < w; x++) {
++			uint32_t c = px[y * w + x];
++			*p++ = c >> 16; *p++ = c >> 8; *p++ = c;
++		}
++	}
++	compress(z, &z_n, raw, raw_n);
++	FILE *f = fopen(path, "wb");
++	fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
++	uint8_t ihdr[13] = {w >> 24, w >> 16, w >> 8, w, h >> 24, h >> 16, h >> 8, h, 8, 2, 0, 0, 0};
++	gp_chunk(f, "IHDR", ihdr, 13);
++	gp_chunk(f, "IDAT", z, z_n);
++	gp_chunk(f, "IEND", (const uint8_t *)"", 0);
++	fclose(f);
++	free(raw);
++	free(z);
+ }
+ 
++static void gp_dump_frame(vdp_context *context)
++{
++	static FILE *ft;
++	static long nframe = 1;
++	static const char *dir;
++	static long stop;
++	if (!ft) {
++		dir = getenv("BLASTEM_DUMP");
++		if (!dir) { return; }
++		char path[1024];
++		snprintf(path, sizeof path, "%s/frames.txt", dir);
++		ft = fopen(path, "w");
++		stop = getenv("BLASTEM_FRAMES") ? atol(getenv("BLASTEM_FRAMES")) : 0;
++	}
++	nframe++;
++	int h = context->inactive_start;
++	int w = (context->regs[REG_MODE_4] & BIT_H40) ? 320 : 256;
++	static uint32_t frame[512 * 320];
++	char *base = (char *)context->fb + context->output_pitch * (context->border_top + context->top_offset);
++	for (int y = 0; y < h; y++) {
++		pixel_t *src = (pixel_t *)(base + context->output_pitch * y) + BORDER_LEFT;
++		for (int x = 0; x < w; x++) {
++			frame[y * w + x] = src[x] & 0xFFFFFF;
++		}
++	}
++	fprintf(ft, "%ld %dx%d %08lx\n", nframe, w, h, crc32(0, (const Bytef *)frame, w * h * 4));
++	fflush(ft);
++	const char *keep = getenv("BLASTEM_KEEP");
++	if (keep) {
++		char num[32], list[8192];
++		snprintf(num, sizeof num, ",%ld,", nframe);
++		snprintf(list, sizeof list, ",%s,", keep);
++		if (!strcmp(keep, "all") || strstr(list, num)) {
++			char path[1024];
++			snprintf(path, sizeof path, "%s/f_%05ld.png", dir, nframe);
++			gp_png(path, frame, w, h);
++		}
++	}
++	if (getenv("BLASTEM_VRAM") && atol(getenv("BLASTEM_VRAM")) == nframe) {
++		char path[1024];
++		snprintf(path, sizeof path, "%s/vram_%05ld.bin", dir, nframe);
++		FILE *f = fopen(path, "wb");
++		fwrite(context->vdpmem, 1, 65536, f);
++		fwrite(context->regs, 1, 24, f);
++		fwrite(context->sat_cache, 1, sizeof(context->sat_cache), f);
++		fclose(f);
++	}
++	if (stop && nframe >= stop) { exit(0); }
++}
++
+ static void advance_output_line(vdp_context *context)
+ {
+ 	//This function is kind of gross because of the need to deal with vertical border busting via mode changes
++	//(Genesis-Pocket: the last active line is long done 4 lines into the border)
++	if (headless && context->vcounter == context->inactive_start + 4) { gp_dump_frame(context); }
+ 	uint16_t lines_max = context->inactive_start + context->border_bot + context->border_top;
+ 	uint32_t output_line = context->vcounter;
+ 	if (!(context->regs[REG_MODE_2] & BIT_MODE_5)) {

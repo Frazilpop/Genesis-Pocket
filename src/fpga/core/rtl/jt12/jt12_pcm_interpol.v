@@ -28,7 +28,13 @@ module jt12_pcm_interpol
     input           cen55,    // clk & cen55  =  55 kHz
     input           pcm_wr,      // advance to next sample
     input      signed [dw-1:0] pcmin,
-    output reg signed [dw-1:0] pcmout
+    output reg signed [dw-1:0] pcmout,
+    // Save states: it runs on clk, so in scan mode
+    // all of it holds; on the chain, then the divider's
+    input           ss,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go
 );
 
 reg [stepw-1:0] dn, pre_dn={stepw{1'b1}};
@@ -42,8 +48,16 @@ reg signed [dw-1:0] pcmnew, dx, pcmlast, pcminter;
 wire signed [dw:0]  dx_ext = { pcmin[dw-1], pcmin } - { pcmnew[dw-1], pcmnew };
 reg sign, last_pcm_wr;
 
+localparam SW = 3 + 2*stepw + 5*dw;
+wire [SW-1:0] ss_gv = { last_pcm_wr, start_div, pre_dn, pcmnew, pcmlast, dn, dx,
+                        sign, pcminter, pcmout };
+wire [SW-1:0] ss_gn = { ss_gv[SW-2:0], ss_gi };
+
 // latch new data and compute the two deltas : dx and dn, slope = dx/dn
-always @(posedge clk) begin
+always @(posedge clk)
+if( ss_gsh )
+    { last_pcm_wr, start_div, pre_dn, pcmnew, pcmlast, dn, dx, sign } <= ss_gn[SW-1:2*dw];
+else if( !ss ) begin
     last_pcm_wr <= pcm_wr;    
     start_div   <= posedge_pcmwr;
 
@@ -70,7 +84,10 @@ wire overflow_up   = 0;//next_up[dw-1]   != pcmnew[dw-1];
 wire overflow_down = 0;//next_down[dw-1] != pcmnew[dw-1];
 
 
-always @(posedge clk) begin
+always @(posedge clk)
+if( ss_gsh )
+    pcminter <= ss_gn[2*dw-1:dw];
+else if( !ss ) begin
     if( negedge_pcmwr ) begin
         pcminter <= pcmlast;
     end else if(cen55 && !working && !pcm_wr) begin // only advance if the divider has finished
@@ -91,18 +108,23 @@ end
 
 // output only at cen55
 
-always @(posedge clk) if(cen55) pcmout <= pcminter;
+always @(posedge clk)
+    if( ss_gsh ) pcmout <= ss_gn[dw-1:0];
+    else if(cen55 && !ss) pcmout <= pcminter;
 
 jt10_adpcm_div #(.dw(dw)) u_div(
     .rst_n  ( rst_n       ),
     .clk    ( clk         ),
-    .cen    ( 1'b1        ),
+    .cen    ( ~ss         ),
     .start  ( start_div   ),
     .a      ( dx          ),
     .b      ( { {dw-stepw{1'b0}}, dn }   ),
     .d      ( step        ),
     .r      (             ),
-    .working( working     )
+    .working( working     ),
+    .ss_gsh ( ss_gsh      ),
+    .ss_gi  ( ss_gv[SW-1] ),
+    .ss_go  ( ss_go       )
 );
 
 

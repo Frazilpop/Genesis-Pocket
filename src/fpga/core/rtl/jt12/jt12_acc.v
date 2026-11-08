@@ -52,7 +52,13 @@ module jt12_acc(
     input   signed [8:0] pcm,
     // combined output
     output reg signed   [15:0]  left,
-    output reg signed   [15:0]  right
+    output reg signed   [15:0]  right,
+    // Save states: held in scan mode, on the chain;
+    // left and right follow from the rest, so they run in scan mode
+    input               ss,
+    input               ss_gsh,
+    input               ss_gi,
+    output              ss_go
 );
 
 reg sum_en;
@@ -67,8 +73,15 @@ always @(*) begin
 end
 
 reg pcm_sum;
+reg [1:0] rl_latch, rl_old;
 
-always @(posedge clk) if(clk_en)
+wire [4:0] ss_gv = { pcm_sum, rl_latch, rl_old };
+wire [4:0] ss_gn = { ss_gv[3:0], ss_gi };
+
+always @(posedge clk)
+if( ss_gsh )
+    pcm_sum <= ss_gn[4];
+else if(clk_en && !ss)
     if( zero ) pcm_sum <= 1'b1;
     else if( ch6op ) pcm_sum <= 1'b0;
 
@@ -92,7 +105,11 @@ jt12_single_acc #(.win(9),.wout(9)) u_acc(
     .sum_en     ( sum_or_pcm     ),
     .zero       ( zero           ),
     // .snd        ( pre_left       )
-    .snd        ( acc_out        )
+    .snd        ( acc_out        ),
+    .ss         ( ss             ),
+    .ss_gsh     ( ss_gsh         ),
+    .ss_gi      ( ss_gv[4]       ),
+    .ss_go      ( ss_go          )
 );
 
 // jt12_single_acc #(.win(9),.wout(12)) u_right(
@@ -113,19 +130,27 @@ jt12_single_acc #(.win(9),.wout(9)) u_acc(
 
 wire signed [15:0] acc_expand = {{7{acc_out[8]}}, acc_out};
 
-reg [1:0] rl_latch, rl_old;
+// Genesis: a muted channel (its pan bit off) takes the step a zero value
+// takes, whatever its value, so it holds still. MiSTer's gave it +7 or -6 by
+// the value's sign, a one-bit copy of a quiet note: a buzz under a game's
+// pause, which mutes channels by their pan while their notes release.
+wire signed [4:0] ladder_step = ~ladder ? 5'd0 : (acc_expand >= 0 ? 5'd7 : 5'd0);
+wire signed [4:0] ladder_mute = ~ladder ? 5'd0 : 5'd7;
 
-wire signed [4:0] ladder_left = ~ladder ? 5'd0 : (acc_expand >= 0 ? 5'd7 : (rl_old[1] ? 5'd0 : -5'd6));
-wire signed [4:0] ladder_right = ~ladder ? 5'd0 : (acc_expand >= 0 ? 5'd7 : (rl_old[0] ? 5'd0 : -5'd6));
-
-always @(posedge clk) if(clk_en) begin
+always @(posedge clk)
+if( ss_gsh )
+    { rl_latch, rl_old } <= ss_gn[3:0];
+else if(clk_en && !ss) begin
     if (channel_en)
         rl_latch <= rl;
     if (zero)
         rl_old <= rl_latch;
+end
 
-    left  <= rl_old[1] ? acc_expand + ladder_left : ladder_left;
-    right <= rl_old[0] ? acc_expand + ladder_right : ladder_right;
+always @(posedge clk) if(clk_en) begin
+
+    left  <= rl_old[1] ? acc_expand + ladder_step : ladder_mute;
+    right <= rl_old[0] ? acc_expand + ladder_step : ladder_mute;
 end
 
 endmodule

@@ -29,7 +29,25 @@ entity SVP is
 		DRAM_A		: out std_logic_vector(16 downto 1);		
 		DRAM_DI		: in std_logic_vector(15 downto 0);
 		DRAM_DO		: out std_logic_vector(15 downto 0);
-		DRAM_WE		: out std_logic
+		DRAM_WE		: out std_logic;
+
+		-- Save states. With CE held the memory machine
+		-- finishes what it is doing and SS_QUIET comes up; nothing then moves. Everything
+		-- the machine goes on from is one chain of 16-bit words: SS_SH moves it along
+		-- a word, SS_SI in at the tail, the head on SS_SO, the file's order. SS_EN (once
+		-- quiet): the RAMs at SS_A, written from SS_SI by their SS_*_WE.
+		SS_SH			: in std_logic := '0';
+		SS_SI			: in std_logic_vector(15 downto 0) := (others => '0');
+		SS_SO			: out std_logic_vector(15 downto 0);
+		SS_EN			: in std_logic := '0';
+		SS_A			: in std_logic_vector(9 downto 0) := (others => '0');
+		SS_RA_WE		: in std_logic := '0';
+		SS_RB_WE		: in std_logic := '0';
+		SS_IR_WE		: in std_logic := '0';
+		SS_RA_Q		: out std_logic_vector(15 downto 0);
+		SS_RB_Q		: out std_logic_vector(15 downto 0);
+		SS_IR_Q		: out std_logic_vector(15 downto 0);
+		SS_QUIET		: out std_logic
 	);
 end SVP;
 
@@ -104,6 +122,11 @@ architecture rtl of SVP is
 	signal IRAM_D 			: std_logic_vector(15 downto 0);
 	signal IRAM_WE 		: std_logic;
 	signal IRAM_Q 			: std_logic_vector(15 downto 0);
+	
+	--Save states
+	signal SS_SSP_POS		: std_logic_vector(2 downto 0);
+	signal SS_PAD			: std_logic_vector(3 downto 0);
+	signal SS_MISC			: std_logic_vector(15 downto 0);
 	
 	impure function GetNextMA(pmar: PMAR_r) return std_logic_vector is
 		variable displ: std_logic_vector(15 downto 0); 
@@ -190,8 +213,26 @@ begin
 		ST56		=> SSP_ST56,
 		
 		BLIND_RD	=> SSP_BL_RD,
-		BLIND_WR	=> SSP_BL_WR
+		BLIND_WR	=> SSP_BL_WR,
+
+		SS_SH		=> SS_SH,
+		SS_SI		=> SS_MISC,
+		SS_SO		=> SS_SO,
+		SS_POS_I	=> PMC(27 downto 25),
+		SS_POS_O	=> SS_SSP_POS,
+		SS_EN		=> SS_EN,
+		SS_A		=> SS_A(7 downto 0),
+		SS_D		=> SS_SI,
+		SS_RA_WE	=> SS_RA_WE,
+		SS_RB_WE	=> SS_RB_WE,
+		SS_RA_Q	=> SS_RA_Q,
+		SS_RB_Q	=> SS_RB_Q
 	);
+	
+	-- the chain's one word of odd bits (SS_PAD only fills it, as a word goes through
+	-- every place on its way): the stack's position, then what is left over here
+	SS_MISC <= SS_PAD & SS_SSP_POS & HALT & CA & SA & PMC_SEL & PMAR_SET & std_logic_vector(PMAR_NUM);
+	SS_QUIET <= '1' when MAS = MAS_IDLE and PMAR_ACTIVE = '0' and SSP_ACTIVE = '0' and MEM_WAIT = '0' and DRAM_GEN_REQ = '0' and MA_ROM_REQ = ROM_ACK else '0';
 	
 	--I/O
 	process(CLK, RST_N)
@@ -301,6 +342,13 @@ begin
 					end if;
 				end if;
 			end if;
+			if SS_SH = '1' then
+				HALT <= PMC(24);
+				CA <= PMC(23);
+				SA <= PMC(22);
+				PMC_SEL <= PMC(21);
+				XST <= ROM_DATA;
+			end if;
 		end if;
 	end process;
 	
@@ -357,6 +405,7 @@ begin
 			PMC <= (others => '0');
 			PMARS <= (others => ((others => '0'),(others => '0'),(others => '0')));
 			PMAR_SET <= '0';
+			SS_PAD <= (others => '0');
 			MAS <= MAS_IDLE;
 			PMAR_NUM <= (others => '0');
 			MA_ROM_REQ <= '0';
@@ -501,6 +550,28 @@ begin
 					end if;
 				end if;
 			end if;
+			
+			--the chain, from the odd word on: PMC, XST, ROM_DATA, then the PMARs in turn
+			if SS_SH = '1' then
+				SS_PAD <= PMC(31 downto 28);
+				PMAR_SET <= PMC(20);
+				PMAR_NUM <= unsigned(PMC(19 downto 16));
+				PMC <= PMC(15 downto 0) & XST;
+				ROM_DATA <= PMARS(0).MA(31 downto 16);
+				for i in 0 to 12 loop
+					if i <= 4 or i >= 8 then
+						PMARS(i).MA <= PMARS(i).MA(15 downto 0) & PMARS(i).DATA;
+						PMARS(i).DATA <= PMARS(i).CD;
+						if i = 12 then
+							PMARS(i).CD <= SS_SI;
+						elsif i = 4 then
+							PMARS(i).CD <= PMARS(8).MA(31 downto 16);
+						else
+							PMARS(i).CD <= PMARS(i + 1).MA(31 downto 16);
+						end if;
+					end if;
+				end loop;
+			end if;
 		end if;
 	end process;
 	
@@ -509,9 +580,10 @@ begin
 	
 	
 	--IRAM
-	IRAM_ADDR <= MEM_ADDR(9 downto 0) when MAS = MAS_IRAM_RD or MAS = MAS_IRAM_WR else SSP_PA(9 downto 0);
-	IRAM_D <= PMARS(to_integer(PMAR_NUM)).DATA;
-	IRAM_WE <= '1' when MAS = MAS_IRAM_WR else '0';
+	IRAM_ADDR <= SS_A when SS_EN = '1' else MEM_ADDR(9 downto 0) when MAS = MAS_IRAM_RD or MAS = MAS_IRAM_WR else SSP_PA(9 downto 0);
+	IRAM_D <= SS_SI when SS_EN = '1' else PMARS(to_integer(PMAR_NUM)).DATA;
+	IRAM_WE <= SS_IR_WE when SS_EN = '1' else '1' when MAS = MAS_IRAM_WR else '0';
+	SS_IR_Q <= IRAM_Q;
 	IRAM : entity work.spram generic map(10, 16)
 	port map(
 		clock		=> CLK,

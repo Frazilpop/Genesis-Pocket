@@ -1,0 +1,22 @@
+# Everything a build makes lives under build/ (tools/build.sh): Quartus's
+# db/, incremental_db/ and output_files/ in src/fpga are links into it.
+/build/
+/src/fpga/db
+/src/fpga/incremental_db
+/src/fpga/output_files
+# The bitstream tools/build.sh writes into dist for the card. Each Mac builds
+# its own; it never goes in git.
+/dist/Cores/*/bitstream.rbf_r
+# Written with the date by Analogue's pre-flow script on every compile.
+/src/fpga/apf/build_id.mif
+# Repos cloned to read beside this one, never committed
+/third_party/
+# ROMs are never committed
+*.md.rom
+/roms/
+*.bin.rom
+.DS_Store
+
+# The working notes, kept on disk and never published.
+/CLAUDE.md
+/docs/

@@ -47,7 +47,16 @@ module jt12_op(
     input           zero,
     
     output  signed [ 8:0]   op_result,
-    output  signed [13:0]   full_result
+    output  signed [13:0]   full_result,
+    // Save states: in scan mode the feedback memories
+    // and the phase modulation's delay turn with nothing updated; stage I's
+    // registers and stages VIII on hold, on the chain
+    input           ss,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go,
+    output  [51:0]  ss_tap,
+    input   [51:0]  ss_tnew
 );
 
 parameter num_ch = 6;
@@ -73,7 +82,11 @@ wire [13:0] prev1, prevprev1, prev2;
 reg [13:0] prev1_din, prevprev1_din, prev2_din;
 
 always @(*)
-    if( num_ch==3 ) begin
+    if( ss ) begin
+        prev1_din     = ss_tnew[51:38];
+        prevprev1_din = ss_tnew[37:24];
+        prev2_din     = ss_tnew[23:10];
+    end else if( num_ch==3 ) begin
         prev1_din     = s1_enters ? op_result_internal : prev1;
         prevprev1_din = s3_enters ? op_result_internal : prevprev1;
         prev2_din     = s2_enters ? op_result_internal : prev2;
@@ -135,7 +148,15 @@ always @(*) begin
     ys = { y[13], y }; // sign-extend
 end
 
-always @(posedge clk) if( clk_en ) begin
+// Save states: the chain, assigned below where all its registers are declared
+localparam SS_W = 81;
+wire [SS_W-1:0] ss_gn;
+wire op_en = clk_en && !ss;
+
+always @(posedge clk)
+if( ss_gsh )
+    { pm_preshift_II, s1_II } <= ss_gn[80:65];
+else if( clk_en && !ss ) begin
     pm_preshift_II <= xs + ys; // carry is discarded
     s1_II <= s1_enters;
 end
@@ -173,13 +194,15 @@ end
         jt12_sh #( .width(10), .stages(6)) phasemod_sh(
             .clk    ( clk   ),
             .clk_en ( clk_en),
-            .din    ( phasemod_II ),
+            .din    ( ss ? ss_tnew[9:0] : phasemod_II ),
             .drop   ( phasemod_VIII )
         );
 //     else begin
 //         assign phasemod_VIII = phasemod_II;
 //     end
 // endgenerate
+
+assign ss_tap = { prev1, prevprev1, prev2, phasemod_VIII };
 
 // REGISTER/CYCLE 8
 reg [ 9:0]  phase;
@@ -195,16 +218,33 @@ always @(*) begin
     aux_VIII= phase[7:0] ^ {8{~phase[8]}};
 end
 
-always @(posedge clk) if( clk_en ) begin    
+always @(posedge clk)
+if( ss_gsh )
+    signbit_IX <= ss_gn[64];
+else if( op_en ) begin
     signbit_IX <= phase[9];     
+end
+
+// Save states: the two tables are RAM blocks, their registers out of the
+// chain's reach. A copy of the address each last took is on the chain, and
+// at each step of the chain each is read again at the address its copy
+// takes, so they end up as the copies say.
+reg  [ 7:0]  ss_sin_a, ss_exp_a;
+
+always @(posedge clk)
+if( ss_gsh )
+    { ss_sin_a, ss_exp_a } <= ss_gn[15:0];
+else if( op_en ) begin
+    ss_sin_a <= aux_VIII;
+    ss_exp_a <= atten_internal_IX[7:0];
 end
 
 wire [11:0]  logsin_IX;
 
 jt12_logsin u_logsin (
     .clk    ( clk       ),
-    .clk_en ( clk_en    ),
-    .addr   ( aux_VIII[7:0] ),
+    .clk_en ( op_en | ss_gsh ),
+    .addr   ( ss_gsh ? ss_gn[15:8] : aux_VIII[7:0] ),
     .logsin ( logsin_IX )
 );  
 
@@ -224,17 +264,23 @@ reg  [3:0] exponent_X, exponent_XI;
 
 jt12_exprom u_exprom(
     .clk    ( clk       ),
-    .clk_en ( clk_en    ),
-    .addr   ( atten_internal_IX[7:0] ),
+    .clk_en ( op_en | ss_gsh ),
+    .addr   ( ss_gsh ? ss_gn[7:0] : atten_internal_IX[7:0] ),
     .exp    ( mantissa_X )
 );
 
-always @(posedge clk) if( clk_en ) begin
+always @(posedge clk)
+if( ss_gsh )
+    { signbit_X, exponent_X } <= { ss_gn[63], ss_gn[61:58] };
+else if( op_en ) begin
     exponent_X <= atten_internal_IX[11:8];    
     signbit_X  <= signbit_IX;    
 end
 
-always @(posedge clk) if( clk_en ) begin
+always @(posedge clk)
+if( ss_gsh )
+    { signbit_XI, exponent_XI, mantissa_XI } <= { ss_gn[62], ss_gn[57:44] };
+else if( op_en ) begin
     mantissa_XI <= mantissa_X;
     exponent_XI <= exponent_X;
     signbit_XI  <= signbit_X;     
@@ -261,13 +307,21 @@ always @(*) begin
     endcase
 end
 
-always @(posedge clk) if( clk_en ) begin
+always @(posedge clk)
+if( ss_gsh )
+    { op_XII, op_result_internal } <= ss_gn[43:16];
+else if( op_en ) begin
     // REGISTER CYCLE 11
     op_XII <= ({ test_214, shifter_3 } ^ {14{signbit_XI}}) + {13'd0,signbit_XI};               
     // REGISTER CYCLE 12
     // Extra register, take output after here
     op_result_internal <= op_XII;   
 end
+
+wire [SS_W-1:0] ss_gv = { pm_preshift_II, s1_II, signbit_IX, signbit_X, signbit_XI,
+    exponent_X, exponent_XI, mantissa_XI, op_XII, op_result_internal, ss_sin_a, ss_exp_a };
+assign ss_gn = { ss_gv[SS_W-2:0], ss_gi };
+assign ss_go = ss_gv[SS_W-1];
 
 `ifdef SIMULATION
 reg signed [13:0] op_sep2_0;

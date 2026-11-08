@@ -39,7 +39,12 @@ module jt12_timers(
   output    flag_A,
   output    flag_B,
   output    overflow_A,
-  output    irq_n
+  output    irq_n,
+  // Save states: held in scan mode, on the chain
+  input     ss,
+  input     ss_gsh,
+  input     ss_gi,
+  output    ss_go
 );
 
 parameter num_ch = 6;
@@ -59,6 +64,8 @@ end
 
 wire zero       = num_ch == 6 ? zero : (zero2&zero);
 */
+wire ss_a_go;
+
 jt12_timer #(.CW(10)) timer_A(
     .clk        ( clk         ),
     .rst        ( rst         ),
@@ -68,7 +75,11 @@ jt12_timer #(.CW(10)) timer_A(
     .load       ( load_A      ),
     .clr_flag   ( clr_flag_A  ),
     .flag       ( flag_A      ),
-    .overflow   ( overflow_A  )
+    .overflow   ( overflow_A  ),
+    .ss         ( ss          ),
+    .ss_gsh     ( ss_gsh      ),
+    .ss_gi      ( ss_gi       ),
+    .ss_go      ( ss_a_go     )
 );
 
 jt12_timer #(.CW(8),.FREE_EN(1)) timer_B(
@@ -80,7 +91,11 @@ jt12_timer #(.CW(8),.FREE_EN(1)) timer_B(
     .load       ( load_B      ),
     .clr_flag   ( clr_flag_B  ),
     .flag       ( flag_B      ),
-    .overflow   (             )
+    .overflow   (             ),
+    .ss         ( ss          ),
+    .ss_gsh     ( ss_gsh      ),
+    .ss_gi      ( ss_a_go     ),
+    .ss_go      ( ss_go       )
 );
 
 endmodule
@@ -98,7 +113,11 @@ module jt12_timer #(parameter
     input   load,
     input   clr_flag,
     output reg flag,
-    output reg overflow
+    output reg overflow,
+    input   ss,
+    input   ss_gsh,
+    input   ss_gi,
+    output  ss_go
 );
 /* verilator lint_off WIDTH */
 reg          load_l;
@@ -106,10 +125,25 @@ reg [CW-1:0] cnt, next;
 reg [FW-1:0] free_cnt, free_next;
 reg          free_ov;
 
+// Save states: the free-running count is on the chain only where it counts
+localparam SW = 2 + CW + (FREE_EN ? FW : 0);
+wire [SW-1:0] ss_gv;
+wire [SW-1:0] ss_gn = { ss_gv[SW-2:0], ss_gi };
+assign ss_go = ss_gv[SW-1];
+generate
+    if( FREE_EN ) begin : ss_free
+        assign ss_gv = { flag, load_l, cnt, free_cnt };
+    end else begin : ss_nofree
+        assign ss_gv = { flag, load_l, cnt };
+    end
+endgenerate
+
 always@(posedge clk, posedge rst)
     if( rst )
         flag <= 1'b0;
-    else /*if(cen)*/ begin
+    else if( ss_gsh )
+        flag <= ss_gn[SW-1];
+    else if( !ss ) /*if(cen)*/ begin
         if( clr_flag )
             flag <= 1'b0;
         else if( cen && zero && load && overflow ) flag<=1'b1;
@@ -120,7 +154,10 @@ always @(*) begin
     {overflow, next }    = { 1'b0, cnt }     + (FREE_EN ? free_ov : 1'b1);
 end
 
-always @(posedge clk) begin
+always @(posedge clk)
+if( ss_gsh )
+    { load_l, cnt } <= ss_gn[SW-2 -: CW+1];
+else if( !ss ) begin
     load_l <= load;
     if( !load_l && load ) begin
         cnt <= start_value;
@@ -132,7 +169,9 @@ end
 always @(posedge clk) begin
     if( rst ) begin
         free_cnt <= 0;
-    end else if( cen && zero ) begin
+    end else if( ss_gsh ) begin
+        free_cnt <= ss_gn[FW-1:0];
+    end else if( cen && zero && !ss ) begin
         free_cnt <= free_cnt+1'd1;
     end
 end

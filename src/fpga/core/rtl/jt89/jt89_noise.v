@@ -30,8 +30,15 @@ module jt89_noise(
     input         [2:0] ctrl3,
     input         [3:0] vol,
     input         [9:0] tone2,
-    output        [8:0] snd
+    output        [8:0] snd,
+    // save states: the shift register, the counter and
+    // the volume stage, read and written whole
+    output       [35:0] ss_q,
+    input               ss_we,
+    input        [35:0] ss_d
 );
+
+assign ss_q = { shift, cnt, snd };
 
 reg [15:0] shift;
 reg [10:0] cnt;
@@ -43,12 +50,16 @@ jt89_vol u_vol(
     .clk_en ( clk_en    ),
     .din    ( shift[0]  ),
     .vol    ( vol       ),
-    .snd    ( snd       )
+    .snd    ( snd       ),
+    .ss_we  ( ss_we     ),
+    .ss_d   ( ss_d[8:0] )
 );
 
 always @(posedge clk) 
     if( rst ) begin
         cnt <= 'd0;
+    end else if( ss_we ) begin
+        cnt <= ss_d[19:9];
     end else if( clk_en ) begin
         if( cnt==11'd1 ) begin
             case( ctrl3[1:0] )
@@ -65,7 +76,11 @@ always @(posedge clk)
 wire fb = ctrl3[2]?(shift[0]^shift[3]):shift[0];
     
 always @(posedge clk)
-    if( rst || clr )
+    if( rst )
+        shift <= { 1'b1, 15'd0 };
+    else if( ss_we )
+        shift <= ss_d[35:20];
+    else if( clr )
         shift <= { 1'b1, 15'd0 };
     else if( clk_en ) begin
         if( cnt==1 ) begin

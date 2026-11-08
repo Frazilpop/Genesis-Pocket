@@ -79,6 +79,12 @@ module multitap
 
 	output       HL,
 
+	// save states: gen_io's
+	input  [3:0] SS_IDX,
+	output[15:0] SS_Q,
+	input        SS_WE,
+	input [15:0] SS_D,
+
 	input        JCART_SEL,
 	output[15:0] JCART_DO,
 	output       JCART_DTACK_N
@@ -145,7 +151,8 @@ pad_io jcart_u
 	.DIR(0),
 	.DI(DI[0]),
 	.DO(JCART_DO[15:8]),
-	.DTACK_N(JCART_DTACK_N)
+	.DTACK_N(JCART_DTACK_N),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)
 );
 
 pad_io jcart_l
@@ -169,7 +176,8 @@ pad_io jcart_l
 	.DIR(0),
 	.DI(DI[0]),
 	.DO(JCART_DO[7:0]),
-	.DTACK_N()
+	.DTACK_N(),
+	.PSS_Q(), .PSS_WEH(1'b0), .PSS_WEL(1'b0), .PSS_D(16'd0)
 );
 
 assign DO = (FOURWAY_EN && (A==1 || A==2)) ? FW_DO : 

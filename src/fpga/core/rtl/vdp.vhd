@@ -90,6 +90,7 @@ entity vdp is
 		VBUS_DTACK_N: in  std_logic;
 
 		PAL         : in  std_logic := '0';
+		PAL_SAYS    : in  std_logic := '0'; -- what the status register reports, PAL is the timing
 
 		CE_PIX      : buffer std_logic;
 		FIELD_OUT   : out std_logic;
@@ -112,6 +113,26 @@ entity vdp is
 		OBJ_LIMIT_HIGH_EN : in std_logic := '0'; -- Enable more sprites and pixels per line
 
 		TRANSP_DETECT : out std_logic;
+
+		-- Save states. With SS_EN the save logic
+		-- has a word port into the CPU side's registers and memories (the CPU
+		-- side is idle: SS_IDLE): SS_ADDR's word, SS_DO three clocks later,
+		-- SS_WE writes SS_DI. 000-017 the registers, 018-01F the port and the
+		-- FIFO, 020-021 the snapshot, 040-07F CRAM, 080-0A7 VSRAM, 100-19F the
+		-- sprite cache. SS_SNAP copies the flags that drift while the CPUs are
+		-- frozen into the snapshot; SS_REST writes them back. SS_POS is the
+		-- raster position (field, line, dot, pixel divider); SS_SPR while the
+		-- sprite engines may read the cache.
+		SS_EN       : in  std_logic := '0';
+		SS_ADDR     : in  std_logic_vector(9 downto 0) := (others => '0');
+		SS_DI       : in  std_logic_vector(15 downto 0) := (others => '0');
+		SS_DO       : out std_logic_vector(15 downto 0);
+		SS_WE       : in  std_logic := '0';
+		SS_SNAP     : in  std_logic := '0';
+		SS_REST     : in  std_logic := '0';
+		SS_IDLE     : out std_logic;
+		SS_POS      : out std_logic_vector(22 downto 0);
+		SS_SPR      : out std_logic;
 		
 		--debug
 		BGA_EN		: in  std_logic;
@@ -121,6 +142,11 @@ entity vdp is
 end vdp;
 
 architecture rtl of vdp is
+
+-- save states: the snapshot (SS_SNAP, SS_REST) and the port's read
+signal SS_SNAP_HV    : std_logic_vector(15 downto 0);
+signal SS_SNAP_FLAGS : std_logic_vector(7 downto 0);
+signal SS_Q          : std_logic_vector(15 downto 0);
 
 signal vram_a_reg	: std_logic_vector(16 downto 1);
 signal vram32_a_reg : std_logic_vector(15 downto 1);
@@ -785,7 +811,8 @@ port map(
 	byteena_a   => OBJ_CACHE_BE
 );
 
-OBJ_CACHE_ADDR_RD <= OBJ_CACHE_ADDR_RD_SP1 when SP1C /= SP1C_DONE else OBJ_CACHE_ADDR_RD_SP2;
+OBJ_CACHE_ADDR_RD <= SS_ADDR(7 downto 1) when SS_EN = '1' and SS_ADDR(9 downto 8) = "01" else
+                     OBJ_CACHE_ADDR_RD_SP1 when SP1C /= SP1C_DONE else OBJ_CACHE_ADDR_RD_SP2;
 
 obj_visinfo : entity work.DualPortRAM
 generic map (
@@ -929,7 +956,7 @@ SATB <= REG(5)(7 downto 1)&(REG(5)(0) and not H40);
 ODD <= FIELD when LSM(0) = '1' else '0';
 IN_DMA <= DMA_FILL or DMA_COPY or DMA_VBUS;
 
-STATUS <= "111111" & FIFO_EMPTY & FIFO_FULL & VINT_TG68_PENDING & SOVR & SCOL & ODD & (IN_VBL or not DE) & IN_HBL & IN_DMA & PAL;
+STATUS <= "111111" & FIFO_EMPTY & FIFO_FULL & VINT_TG68_PENDING & SOVR & SCOL & ODD & (IN_VBL or not DE) & IN_HBL & IN_DMA & PAL_SAYS;
 
 ----------------------------------------------------------------
 -- CPU INTERFACE
@@ -1727,6 +1754,13 @@ begin
 			OBJ_CACHE_BE(0) <= not DT_VRAM_ADDR(1) and not DT_VRAM_LDS_N;
 			OBJ_CACHE_WE <= "01";
 		end if;
+		-- save states: the cache written through the state port
+		if SS_EN = '1' and SS_WE = '1' and SS_ADDR(9 downto 8) = "01" then
+			OBJ_CACHE_ADDR_WR <= SS_ADDR(7 downto 1);
+			OBJ_CACHE_D <= SS_DI & SS_DI;
+			OBJ_CACHE_BE <= SS_ADDR(0) & SS_ADDR(0) & not SS_ADDR(0) & not SS_ADDR(0);
+			OBJ_CACHE_WE <= "01";
+		end if;
 	end if;
 end process;
 
@@ -2359,6 +2393,9 @@ begin
 		
 		if M3 ='0' then	
 			HV <= HV_VCNT_EXT(7 downto 1) & HV8 & HV_HCNT(8 downto 1);
+		end if;
+		if SS_REST = '1' then
+			HV <= SS_SNAP_HV;
 		end if;
 
 		-- H40 slow slots: 8aaaaaaa99aaaaaaa8aaaaaaa99aaaaaaa
@@ -3573,8 +3610,125 @@ begin
 				end if;
 			when others => null;
 		end case;
+
+		-- save states: the state port, when the CPU side is idle
+		if SS_EN = '1' then
+			CRAM_ADDR_A <= SS_ADDR(5 downto 0);
+			VSRAM0_ADDR_A <= SS_ADDR(5 downto 1);
+			VSRAM1_ADDR_A <= SS_ADDR(5 downto 1);
+			CRAM_WE_A <= '0';
+			VSRAM0_WE_A <= '0';
+			VSRAM1_WE_A <= '0';
+			if SS_WE = '1' then
+				if SS_ADDR(9 downto 5) = "00000" and SS_ADDR(4 downto 3) /= "11" then
+					REG( CONV_INTEGER( SS_ADDR(4 downto 0) ) ) <= SS_DI(7 downto 0);
+				elsif SS_ADDR = "0000011000" then
+					ADDR(15 downto 0) <= SS_DI;
+				elsif SS_ADDR = "0000011001" then
+					ADDR(16) <= SS_DI(8);
+					PENDING <= SS_DI(7);
+					CODE <= SS_DI(5 downto 0);
+				elsif SS_ADDR = "0000011010" then
+					DBG <= SS_DI;
+				elsif SS_ADDR = "0000011011" then
+					FIFO_DATA(0) <= SS_DI;
+				elsif SS_ADDR = "0000011100" then
+					FIFO_DATA(1) <= SS_DI;
+				elsif SS_ADDR = "0000011101" then
+					FIFO_DATA(2) <= SS_DI;
+				elsif SS_ADDR = "0000011110" then
+					FIFO_DATA(3) <= SS_DI;
+				elsif SS_ADDR = "0000011111" then
+					FIFO_RD_POS <= SS_DI(3 downto 2);
+					FIFO_WR_POS <= SS_DI(1 downto 0);
+				elsif SS_ADDR(9 downto 6) = "0001" then
+					CRAM_WE_A <= '1';
+					CRAM_D_A <= SS_DI(11 downto 9) & SS_DI(7 downto 5) & SS_DI(3 downto 1);
+				elsif SS_ADDR(9 downto 6) = "0010" and SS_ADDR(5 downto 0) < 40 then
+					if SS_ADDR(0) = '0' then
+						VSRAM0_WE_A <= '1';
+						VSRAM0_D_A <= SS_DI(10 downto 0);
+					else
+						VSRAM1_WE_A <= '1';
+						VSRAM1_D_A <= SS_DI(10 downto 0);
+					end if;
+				end if;
+			end if;
+		end if;
 	end if;
 
+end process;
+
+-- save states: what the state port reads, three clocks after its address
+-- (the memories' address is registered above, then in the RAM)
+SS_IDLE <= '1' when FIFO_EMPTY = '1' and DTC = DTC_IDLE and DMAC = DMA_IDLE and DMA_FILL = '0' and DMA_COPY = '0'
+                    and DMA_VBUS = '0' and DMAF_SET_REQ = '0' and DT_RD_SEL = '0' and BGACK_N_REG = '1'
+                    and FF_VBUS_SEL = '0' and early_ack_dt = '0' else '0';
+SS_POS <= FIELD & HV_VCNT & HV_HCNT & HV_PIXDIV;
+SS_SPR <= PRE_V_ACTIVE or V_ACTIVE;
+
+process( CLK )
+	variable a : std_logic_vector(9 downto 0);
+begin
+	if rising_edge(CLK) then
+		a := SS_ADDR;
+		SS_Q <= (others => '0');
+		if a(9 downto 5) = "00000" and a(4 downto 3) /= "11" then
+			SS_Q(7 downto 0) <= REG( CONV_INTEGER( a(4 downto 0) ) );
+		elsif a = "0000011000" then
+			SS_Q <= ADDR(15 downto 0);
+		elsif a = "0000011001" then
+			SS_Q(8) <= ADDR(16);
+			SS_Q(7) <= PENDING;
+			SS_Q(5 downto 0) <= CODE;
+		elsif a = "0000011010" then
+			SS_Q <= DBG;
+		elsif a = "0000011011" then
+			SS_Q <= FIFO_DATA(0);
+		elsif a = "0000011100" then
+			SS_Q <= FIFO_DATA(1);
+		elsif a = "0000011101" then
+			SS_Q <= FIFO_DATA(2);
+		elsif a = "0000011110" then
+			SS_Q <= FIFO_DATA(3);
+		elsif a = "0000011111" then
+			SS_Q(3 downto 2) <= FIFO_RD_POS;
+			SS_Q(1 downto 0) <= FIFO_WR_POS;
+		elsif a = "0000100000" then
+			SS_Q <= SS_SNAP_HV;
+		elsif a = "0000100001" then
+			SS_Q(7 downto 0) <= SS_SNAP_FLAGS;
+		elsif a(9 downto 6) = "0001" then
+			SS_Q(11 downto 9) <= CRAM_Q_A(8 downto 6);
+			SS_Q(7 downto 5) <= CRAM_Q_A(5 downto 3);
+			SS_Q(3 downto 1) <= CRAM_Q_A(2 downto 0);
+		elsif a(9 downto 6) = "0010" and a(5 downto 0) < 40 then
+			if a(0) = '0' then
+				SS_Q(10 downto 0) <= VSRAM0_Q_A;
+			else
+				SS_Q(10 downto 0) <= VSRAM1_Q_A;
+			end if;
+		elsif a(9 downto 8) = "01" then
+			if a(0) = '0' then
+				SS_Q <= OBJ_CACHE_Q(15 downto 0);
+			else
+				SS_Q <= OBJ_CACHE_Q(31 downto 16);
+			end if;
+		end if;
+		SS_DO <= SS_Q;
+
+		-- the snapshot: taken at the freeze, written back at the letting go
+		-- (the interrupt processes and the counter process take it below);
+		-- a load writes it through the port
+		if SS_SNAP = '1' then
+			SS_SNAP_HV <= HV;
+			SS_SNAP_FLAGS <= VINT_TG68_PENDING & HINT_PENDING & EXINT_PENDING & VINT_TG68_FF & HINT_FF & EXINT_FF & SOVR & SCOL;
+		elsif SS_EN = '1' and SS_WE = '1' and a = "0000100000" then
+			SS_SNAP_HV <= SS_DI;
+		elsif SS_EN = '1' and SS_WE = '1' and a = "0000100001" then
+			SS_SNAP_FLAGS <= SS_DI(7 downto 0);
+		end if;
+	end if;
 end process;
 
 ----------------------------------------------------------------
@@ -3609,6 +3763,11 @@ begin
 		if VINT_TG68_PENDING_SET = '1' then
 			VINT_TG68_PENDING <= '1';
 		end if;
+		if SS_REST = '1' then
+			VINT_TG68_PENDING <= SS_SNAP_FLAGS(7);
+			HINT_PENDING <= SS_SNAP_FLAGS(6);
+			EXINT_PENDING <= SS_SNAP_FLAGS(5);
+		end if;
 	end if;	
 end process;
 
@@ -3619,7 +3778,9 @@ begin
 	if RST_N = '0' then
 		EXINT_FF <= '0';
 	elsif rising_edge( CLK) then
-		if EXINT_PENDING = '1' and IE2 = '1' then
+		if SS_REST = '1' then
+			EXINT_FF <= SS_SNAP_FLAGS(2);
+		elsif EXINT_PENDING = '1' and IE2 = '1' then
 			EXINT_FF <= '1';
 		else
 			EXINT_FF <= '0';
@@ -3634,7 +3795,9 @@ begin
 	if RST_N = '0' then
 		HINT_FF <= '0';
 	elsif rising_edge( CLK) then
-		if HINT_PENDING = '1' and IE1 = '1' then
+		if SS_REST = '1' then
+			HINT_FF <= SS_SNAP_FLAGS(3);
+		elsif HINT_PENDING = '1' and IE1 = '1' then
 			HINT_FF <= '1';
 		else
 			HINT_FF <= '0';
@@ -3649,7 +3812,9 @@ begin
 	if RST_N = '0' then
 		VINT_TG68_FF <= '0';
 	elsif rising_edge( CLK) then
-		if VINT_TG68_PENDING = '1' and IE0 = '1' then
+		if SS_REST = '1' then
+			VINT_TG68_FF <= SS_SNAP_FLAGS(4);
+		elsif VINT_TG68_PENDING = '1' and IE0 = '1' then
 			VINT_TG68_FF <= '1';
 		else
 			VINT_TG68_FF <= '0';
@@ -3678,7 +3843,9 @@ begin
 	if RST_N = '0' then
 		SCOL <= '0';
 	elsif rising_edge( CLK) then
-		if SCOL_SET = '1' then
+		if SS_REST = '1' then
+			SCOL <= SS_SNAP_FLAGS(0);
+		elsif SCOL_SET = '1' then
 			SCOL <= '1';
 		elsif SCOL_CLR = '1' then
 			SCOL <= '0';
@@ -3692,7 +3859,9 @@ begin
 	if RST_N = '0' then
 		SOVR <= '0';
 	elsif rising_edge( CLK) then
-		if SOVR_SET = '1' then
+		if SS_REST = '1' then
+			SOVR <= SS_SNAP_FLAGS(1);
+		elsif SOVR_SET = '1' then
 			SOVR <= '1';
 		elsif SOVR_CLR = '1' then
 			SOVR <= '0';

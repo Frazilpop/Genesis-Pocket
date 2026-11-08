@@ -45,19 +45,33 @@ module jt12_eg (
     input       [6:0]   tl_IV,
 
     output  reg [9:0]   eg_V,
-    output  reg         pg_rst_II
+    output  reg         pg_rst_II,
+    // Save states: in scan mode the loops turn with
+    // nothing updated (the attenuation's and the SSG inversion's through
+    // stages II to IV, which pass their value on), the rest hold (the chain)
+    input               ss,
+    input               ss_gsh,
+    input               ss_gi,
+    output              ss_go,
+    output      [15:0]  ss_tap,
+    input       [15:0]  ss_tnew
 );
 
 parameter num_ch=6;
 
 wire [14:0] eg_cnt;
 
+wire ss_cnt_gi;
+
 jt12_eg_cnt u_egcnt(
     .rst    ( rst   ),
     .clk    ( clk   ),
-    .clk_en ( clk_en & ~eg_stop ),
+    .clk_en ( clk_en & ~eg_stop & ~ss ),
     .zero   ( zero  ),
-    .eg_cnt ( eg_cnt)
+    .eg_cnt ( eg_cnt),
+    .ss_gsh ( ss_gsh    ),
+    .ss_gi  ( ss_cnt_gi ),
+    .ss_go  ( ss_go     )
 );
 
 wire keyon_last_I;
@@ -139,31 +153,50 @@ jt12_eg_comb u_comb(
     .final_eg_out   ( eg_out_IV     )
 );
 
+// Save states: the loops' stages, which step in scan mode too; the taps are
+// where the attenuation and the inversion come back into their loops
 always @(posedge clk) if(clk_en) begin
     eg_in_II    <= eg_in_I;
+    ssg_inv_II  <= ss ? ss_tnew[5] : ssg_inv_out_I;
+
+    eg_in_III   <= eg_in_II;
+    ssg_inv_III <= ssg_inv_II;
+
+    ssg_inv_IV  <= ssg_inv_III;
+    eg_in_IV    <= ss ? ss_tnew[15:6] : pure_eg_out_III;
+end
+
+assign ss_tap = { eg_in_III, ssg_inv_in_I, state_in_I, keyon_last_I, cnt_in_II };
+
+// the rest hold in scan mode, on the chain before the envelope counter
+wire [26:0] ss_gv = { attack_II, base_rate_II, ssg_en_II, pg_rst_II, attack_III,
+    rate_in_III, ssg_en_III, step_III, sum_in_III, eg_V };
+wire [26:0] ss_gn = { ss_gv[25:0], ss_gi };
+assign ss_cnt_gi = ss_gv[26];
+
+always @(posedge clk)
+if( ss_gsh )
+    { attack_II, base_rate_II, ssg_en_II, pg_rst_II, attack_III,
+      rate_in_III, ssg_en_III, step_III, sum_in_III, eg_V } <= ss_gn;
+else if(clk_en && !ss) begin
     attack_II   <= state_next_I[0];
     base_rate_II<= base_rate_I;
     ssg_en_II   <= ssg_en_I;
-    ssg_inv_II  <= ssg_inv_out_I;
     pg_rst_II   <= pg_rst_I;
 
-    eg_in_III   <= eg_in_II;
     attack_III  <= attack_II;
     rate_in_III <= rate_out_II[5:1];
     ssg_en_III  <= ssg_en_II;
-    ssg_inv_III <= ssg_inv_II;
     step_III    <= step_II;
     sum_in_III  <= sum_out_II;
 
-    ssg_inv_IV  <= ssg_inv_III;
-    eg_in_IV    <= pure_eg_out_III;
     eg_V        <= eg_out_IV;
 end
 
 jt12_sh #( .width(1), .stages(4*num_ch) ) u_cntsh(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
-    .din    ( cnt_lsb_II),
+    .din    ( ss ? ss_tnew[0] : cnt_lsb_II ),
     .drop   ( cnt_in_II )
 );
 
@@ -179,7 +212,7 @@ jt12_sh_rst #( .width(3), .stages(4*num_ch), .rstval(1'b1) ) u_egstate(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
     .rst    ( rst       ),
-    .din    ( state_next_I  ),
+    .din    ( ss ? ss_tnew[4:2] : state_next_I ),
     .drop   ( state_in_I    )
 );
 
@@ -195,7 +228,7 @@ jt12_sh_rst #( .width(1), .stages(4*num_ch), .rstval(1'b0) ) u_konsh(
     .clk    ( clk       ),
     .clk_en ( clk_en    ),
     .rst    ( rst       ),  
-    .din    ( keyon_I   ),
+    .din    ( ss ? ss_tnew[1] : keyon_I ),
     .drop   ( keyon_last_I  )
 );
 

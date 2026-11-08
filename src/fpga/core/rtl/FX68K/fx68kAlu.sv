@@ -43,7 +43,8 @@ module fx68kAlu ( input clk, pwrUp, enT1, enT3, enT4,
 	output ze,
 	output reg [15:0] alue,
 	output reg [7:0] ccr,
-	output [15:0] aluOut);
+	output [15:0] aluOut,
+	input ssCcrWe, input [4:0] ssCcrD);	// save states: the CCR loaded
 
 
 `define ALU_ROW_01		16'h0002
@@ -447,6 +448,8 @@ module fx68kAlu ( input clk, pwrUp, enT1, enT3, enT4,
 		// Might be possible to update on T4 (but not after T0) from partial result registered on T3, it will increase performance!
 		if( pwrUp)
 			pswCcr <= '0;
+		else if( ssCcrWe)
+			pswCcr <= ssCcrD;
 		else if( enT3 & ftu2Ccr)
 			pswCcr <= ftu[4:0];	
 		else if( enT3 &	~noCcrEn & (finish | init))

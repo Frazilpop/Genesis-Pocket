@@ -39,7 +39,19 @@ module jt12 (
     // combined output
     output  signed  [15:0]  snd_right,
     output  signed  [15:0]  snd_left,
-    output          snd_sample
+    output          snd_sample,
+    // Save states: jt12_top's scan
+    input           ss_scan,
+    input           ss_step,
+    input   [3:0]   ss_lane,
+    input           ss_load,
+    input   [15:0]  ss_wd,
+    output  [15:0]  ss_tap,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go,
+    output  [4:0]   ss_slot,
+    output          ss_cen
 );
 
 // Default parameters for JT12 select a YM2612
@@ -78,6 +90,17 @@ jt12_top u_jt12(
     .snd_right      ( snd_right     ), // FM+PSG
     .snd_left       ( snd_left      ),  // FM+PSG
     .snd_sample     ( snd_sample    ),
-    .debug_view     (               )
+    .debug_view     (               ),
+    .ss_scan        ( ss_scan       ),
+    .ss_step        ( ss_step       ),
+    .ss_lane        ( ss_lane       ),
+    .ss_load        ( ss_load       ),
+    .ss_wd          ( ss_wd         ),
+    .ss_tap         ( ss_tap        ),
+    .ss_gsh         ( ss_gsh        ),
+    .ss_gi          ( ss_gi         ),
+    .ss_go          ( ss_go         ),
+    .ss_slot        ( ss_slot       ),
+    .ss_cen         ( ss_cen        )
 );
 endmodule // jt03

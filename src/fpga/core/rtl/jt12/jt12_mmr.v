@@ -123,22 +123,38 @@ module jt12_mmr(
     output  [3:0]   psg_addr,
     output  [7:0]   psg_data,
     output  reg     psg_wr_n,
-    input   [7:0]   debug_bus
+    input   [7:0]   debug_bus,
+    // Save states. With ss high the chip is frozen
+    // (cen low) and steps only on ss_step; ss_gsh moves the chain on a bit.
+    input           ss,
+    input           ss_step,
+    input           ss_gsh,
+    input           ss_gi,
+    output          ss_go,
+    output  [71:0]  ss_tap,     // the register file's loops (jt12_reg)
+    input   [71:0]  ss_tnew
 );
 
 parameter use_ssg=0, num_ch=6, use_pcm=1, use_adpcm=0, mask_div=1;
+
+wire clk_en_div, ss_div_go;
+// Save states: in scan mode the chip's clock enable is the scan's step
+assign clk_en = ss ? ss_step : clk_en_div;
 
 jt12_div #(.use_ssg(use_ssg)) u_div (
     .rst            ( rst             ),
     .clk            ( clk             ),
     .cen            ( cen             ),
     .div_setting    ( div_setting     ),
-    .clk_en         ( clk_en          ),
+    .clk_en         ( clk_en_div      ),
     .clk_en_2       ( clk_en_2        ),
     .clk_en_ssg     ( clk_en_ssg      ),
     .clk_en_666     ( clk_en_666      ),
     .clk_en_111     ( clk_en_111      ),
-    .clk_en_55      ( clk_en_55       )
+    .clk_en_55      ( clk_en_55       ),
+    .ss_gsh         ( ss_gsh          ),
+    .ss_gi          ( ss_gi           ),
+    .ss_go          ( ss_div_go       )
 );
 
 reg [7:0]   selected_register;
@@ -201,6 +217,17 @@ reg part;
 // this runs at clk speed, no clock gating here
 // if I try to make this an async rst it fails to map it
 // as flip flops but uses latches instead. So I keep it as sync. reset
+reg [4:0] busy_cnt; // busy lasts for 32 synth clock cycles, like in real chip
+
+// Save states: the registers on the chain, after the prescaler's
+wire [130:0] ss_gv = { selected_register, part, up_ch, up_op, up_keyon,
+    up_opreg, up_chreg, value_A, value_B, clr_flag_B, clr_flag_A,
+    enable_irq_B, enable_irq_A, load_B, load_A, fast_timers, lfo_freq,
+    lfo_en, csm, effect, pcm, pcm_en, pcm_wr, eg_stop, pg_stop,
+    block_ch3op1, fnum_ch3op1, block_ch3op3, fnum_ch3op3,
+    block_ch3op2, fnum_ch3op2, latch_fnum, din_copy, busy, busy_cnt };
+wire [130:0] ss_gn = { ss_gv[129:0], ss_div_go };
+
 always @(posedge clk) begin : memory_mapped_registers
     if( rst ) begin
         selected_register   <= 8'h0;
@@ -258,6 +285,13 @@ always @(posedge clk) begin : memory_mapped_registers
         latch_fnum <= 6'd0;
         din_copy   <= 8'd0;
         part       <= 1'b0;
+    end else if( ss_gsh ) begin
+        { selected_register, part, up_ch, up_op, up_keyon,
+          up_opreg, up_chreg, value_A, value_B, clr_flag_B, clr_flag_A,
+          enable_irq_B, enable_irq_A, load_B, load_A, fast_timers, lfo_freq,
+          lfo_en, csm, effect, pcm, pcm_en, pcm_wr, eg_stop, pg_stop,
+          block_ch3op1, fnum_ch3op1, block_ch3op3, fnum_ch3op3,
+          block_ch3op2, fnum_ch3op2, latch_fnum, din_copy } <= ss_gn[130:6];
     end else begin
         // WRITE IN REGISTERS
         if( write ) begin
@@ -399,7 +433,7 @@ always @(posedge clk) begin : memory_mapped_registers
                     endcase // selected_register
             end
         end
-        else if(clk_en) begin /* clear once-only bits */
+        else if(clk_en && !ss) begin /* clear once-only bits */
             // lfo_rst <= 1'b0;
             { clr_flag_B, clr_flag_A } <= 2'd0;
             psg_wr_n <= 1'b1;
@@ -411,19 +445,19 @@ always @(posedge clk) begin : memory_mapped_registers
     end
 end
 
-reg [4:0] busy_cnt; // busy lasts for 32 synth clock cycles, like in real chip
-
 always @(posedge clk, posedge rst)
     if( rst ) begin
         busy <= 1'b0;
         busy_cnt <= 5'd0;
     end
+    else if( ss_gsh )
+        { busy, busy_cnt } <= ss_gn[5:0];
     else begin
         if (!old_write && write && addr[0] ) begin // only set for data writes
             busy <= 1'b1;
             busy_cnt <= 5'd0;
         end
-        else if(clk_en) begin
+        else if(clk_en && !ss) begin
             if( busy_cnt == 5'd31 ) busy <= 1'b0;
             busy_cnt <= busy_cnt+5'd1;
         end
@@ -504,7 +538,13 @@ jt12_reg #(.num_ch(num_ch)) u_reg(
     .s1_enters  ( s1_enters ),
     .s2_enters  ( s2_enters ),
     .s3_enters  ( s3_enters ),
-    .s4_enters  ( s4_enters )
+    .s4_enters  ( s4_enters ),
+    .ss         ( ss        ),
+    .ss_gsh     ( ss_gsh    ),
+    .ss_gi      ( ss_gv[130]),
+    .ss_go      ( ss_go     ),
+    .ss_tap     ( ss_tap    ),
+    .ss_tnew    ( ss_tnew   )
 );
 
 endmodule

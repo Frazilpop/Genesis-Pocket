@@ -95,7 +95,15 @@ entity T80s is
 		OUT0    : in  std_logic := '0';  -- 0 => OUT(C),0, 1 => OUT(C),255
 		A       : out std_logic_vector(15 downto 0);
 		DI      : in std_logic_vector(7 downto 0);
-		DO      : out std_logic_vector(7 downto 0)
+		DO      : out std_logic_vector(7 downto 0);
+		-- save states: T80's own, through
+		REG     : out std_logic_vector(211 downto 0);
+		DIRSet  : in  std_logic := '0';
+		DIR     : in  std_logic_vector(211 downto 0) := (others => '0');
+		SS_Park : in  std_logic := '0';
+		InstEnd : out std_logic;
+		REGX    : out std_logic_vector(18 downto 0);
+		DIRX    : in  std_logic_vector(18 downto 0) := (others => '0')
 	);
 end T80s;
 
@@ -137,7 +145,14 @@ begin
 		MC => MCycle,
 		TS => TState,
 		OUT0 => OUT0,
-		IntCycle_n => IntCycle_n
+		IntCycle_n => IntCycle_n,
+		REG => REG,
+		DIRSet => DIRSet,
+		DIR => DIR,
+		SS_Park => SS_Park,
+		InstEnd => InstEnd,
+		REGX => REGX,
+		DIRX => DIRX
 	);
 
 	process (RESET_n, CLK)

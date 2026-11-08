@@ -94,7 +94,14 @@ module gen_io
 	output reg       HL,
 
 	input            PAL,
-	input            EXPORT
+	input            EXPORT,
+
+	// save states: the 16 registers and the two pads'
+	// state as twelve 16-bit words, SS_IDX's shown on SS_Q, SS_WE writes it
+	input      [3:0] SS_IDX,
+	output    [15:0] SS_Q,
+	input            SS_WE,
+	input     [15:0] SS_D
 );
 
 reg  [7:0] R[16];
@@ -108,6 +115,10 @@ always @(posedge RESET or posedge CLK) begin
 		DTACK_N <= 1;
 		DO <= 'hFF;
 		R  <= '{0, 'h7F,'h7F,'h7F, 0,0,0, 'hFF,0,0, 'hFF,0,0, 'hFF,0,0};
+	end
+	else if(SS_WE & ~SS_IDX[3]) begin
+		R[{SS_IDX[2:0], 1'b0}] <= SS_D[15:8];
+		R[{SS_IDX[2:0], 1'b1}] <= SS_D[7:0];
 	end
 	else if(CE) begin
 		if(~SEL) DTACK_N <= 1;
@@ -127,6 +138,11 @@ always @(posedge RESET or posedge CLK) begin
 		end
 	end
 end
+
+wire [31:0] PSS1, PSS2;
+assign SS_Q = ~SS_IDX[3] ? { R[{SS_IDX[2:0], 1'b0}], R[{SS_IDX[2:0], 1'b1}] } :
+              SS_IDX[2:0] == 0 ? PSS1[31:16] : SS_IDX[2:0] == 1 ? PSS1[15:0] :
+              SS_IDX[2:0] == 2 ? PSS2[31:16] : SS_IDX[2:0] == 3 ? PSS2[15:0] : 16'd0;
 
 wire [7:0] PAD1_DO;
 pad_io pad1
@@ -154,7 +170,11 @@ pad_io pad1
 	.RNW(RNW),
 	.DIR(~CTLA[6]),
 	.DI(DI[6]),
-	.DO(PAD1_DO)
+	.DO(PAD1_DO),
+	.PSS_Q(PSS1),
+	.PSS_WEH(SS_WE && SS_IDX == 8),
+	.PSS_WEL(SS_WE && SS_IDX == 9),
+	.PSS_D(SS_D)
 );
 
 wire [7:0] PAD2_DO;
@@ -183,7 +203,11 @@ pad_io pad2
 	.RNW(RNW),
 	.DIR(~CTLB[6]),
 	.DI(DI[6]),
-	.DO(PAD2_DO)
+	.DO(PAD2_DO),
+	.PSS_Q(PSS2),
+	.PSS_WEH(SS_WE && SS_IDX == 10),
+	.PSS_WEL(SS_WE && SS_IDX == 11),
+	.PSS_D(SS_D)
 );
 
 wire [7:0] GUN_DO;
@@ -316,11 +340,22 @@ module pad_io
    input DI,
 
    output reg [7:0] DO,
-   output reg       DTACK_N
+   output reg       DTACK_N,
+
+   // save states: TH, the 6-button counter, its timeout and the float timer
+   output    [31:0] PSS_Q,
+   input            PSS_WEH,
+   input            PSS_WEL,
+   input     [15:0] PSS_D
 );
 
 reg TH;
 reg [1:0] JCNT;
+reg [16:0] JTMR;
+reg  [7:0] FLTMR;
+reg THd;
+reg di;
+assign PSS_Q = { TH, JCNT, THd, di, JTMR[16], 2'd0, FLTMR, JTMR[15:0] };
 
 always @(*) begin
 	DO[7:6] = {1'b0,TH};
@@ -333,16 +368,17 @@ always @(*) begin
 end
 
 always @(posedge RESET or posedge CLK) begin
-	reg [16:0] JTMR;
-	reg  [7:0] FLTMR;
-
-	reg THd;
-	reg di;
-
 	if(RESET) begin
 		DTACK_N <= 1;
-		TH   <= 0;
-		JCNT <= 0;
+		TH   <= 1;
+		JCNT <= 3;
+	end
+	else if(PSS_WEH) begin
+		{ TH, JCNT, THd, di, JTMR[16] } <= PSS_D[15:10];
+		FLTMR <= PSS_D[7:0];
+	end
+	else if(PSS_WEL) begin
+		JTMR[15:0] <= PSS_D;
 	end
 	else if(CE) begin
 	

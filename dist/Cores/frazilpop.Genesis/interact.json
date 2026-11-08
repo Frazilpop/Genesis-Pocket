@@ -1,0 +1,212 @@
+{
+    "interact": {
+        "magic": "APF_VER_1",
+        "variables": [
+            {
+                "name": "Reset Core",
+                "id": 2,
+                "type": "action",
+                "enabled": true,
+                "address": "0x00000100",
+                "value": 1
+            },
+            {
+                "name": "Region",
+                "id": 87,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "writeonly": true,
+                "defaultval": "0x00000000",
+                "address": "0x00000108",
+                "options": [
+                    {
+                        "value": "0x00000000",
+                        "name": "Auto"
+                    },
+                    {
+                        "value": "0x00000001",
+                        "name": "United States"
+                    },
+                    {
+                        "value": "0x00000002",
+                        "name": "Europe"
+                    },
+                    {
+                        "value": "0x00000003",
+                        "name": "Japan"
+                    }
+                ]
+            },
+            {
+                "name": "PAL 60 Hz",
+                "id": 88,
+                "type": "check",
+                "enabled": true,
+                "persist": true,
+                "address": "0x00000114",
+                "writeonly": true,
+                "defaultval": 0,
+                "value": 1
+            },
+            {
+                "name": "Multitap",
+                "id": 9,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "writeonly": true,
+                "defaultval": "0x00000000",
+                "address": "0x00000204",
+                "options": [
+                    {
+                        "value": "0x00000000",
+                        "name": "None"
+                    },
+                    {
+                        "value": "0x00000001",
+                        "name": "4-Way Play"
+                    },
+                    {
+                        "value": "0x00000002",
+                        "name": "Team Player (Port 1)"
+                    },
+                    {
+                        "value": "0x00000003",
+                        "name": "Team Player (Port 2)"
+                    },
+                    {
+                        "value": "0x00000004",
+                        "name": "J-Cart"
+                    }
+                ]
+            },
+            {
+                "name": "Lightgun",
+                "id": 70,
+                "type": "check",
+                "enabled": true,
+                "persist": true,
+                "address": "0x0000020C",
+                "writeonly": true,
+                "defaultval": 0,
+                "value": 1
+            },
+            {
+                "name": "Controller",
+                "id": 98,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "writeonly": true,
+                "defaultval": "0x00000000",
+                "address": "0x00000200",
+                "options": [
+                    {
+                        "value": "0x00000000",
+                        "name": "6 Buttons"
+                    },
+                    {
+                        "value": "0x00000001",
+                        "name": "3 Buttons"
+                    }
+                ]
+            },
+            {
+                "name": "Composite Blend",
+                "id": 20,
+                "type": "list",
+                "enabled": true,
+                "writeonly": true,
+                "defaultval": 0,
+                "address": "0x00000304",
+                "persist": true,
+                "options": [
+                    {
+                        "value": 0,
+                        "name": "None"
+                    },
+                    {
+                        "value": 1,
+                        "name": "Full"
+                    },
+                    {
+                        "value": 2,
+                        "name": "Adaptive"
+                    }
+                ]
+            },
+            {
+                "name": "High Sprite Limit",
+                "id": 30,
+                "type": "check",
+                "enabled": true,
+                "persist": true,
+                "address": "0x00000308",
+                "writeonly": true,
+                "defaultval": 0,
+                "value": 1
+            },
+            {
+                "name": "HiFi PCM",
+                "id": 60,
+                "type": "check",
+                "enabled": true,
+                "persist": true,
+                "address": "0x00000408",
+                "writeonly": true,
+                "defaultval": 0,
+                "value": 1
+            },
+            {
+                "name": "Audio Filter",
+                "id": 199,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "address": "0x0000040C",
+                "writeonly": true,
+                "defaultval": "0x00000000",
+                "options": [
+                    {
+                        "value": "0x00000000",
+                        "name": "Model 1"
+                    },
+                    {
+                        "value": "0x00000001",
+                        "name": "Model 2"
+                    },
+                    {
+                        "value": "0x00000002",
+                        "name": "Minimal"
+                    },
+                    {
+                        "value": "0x00000003",
+                        "name": "None"
+                    }
+                ]
+            },
+            {
+                "name": "FM Chip",
+                "id": 299,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "address": "0x00000410",
+                "writeonly": true,
+                "defaultval": 0,
+                "options": [
+                    {
+                        "value": 0,
+                        "name": "YM2612"
+                    },
+                    {
+                        "value": 1,
+                        "name": "YM3438"
+                    }
+                ]
+            }
+        ],
+        "messages": []
+    }
+}

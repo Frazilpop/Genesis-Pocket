@@ -37,7 +37,10 @@ module jt12_csr( // Circular Shift Register + input mux
     input           up_ssgeg,  
     input           update_op_I,
     input           update_op_II,
-    input           update_op_IV
+    input           update_op_IV,
+    // Save states: in scan mode the ring takes ss_din and nothing is updated
+    input           ss,
+    input   [43:0]  ss_din
 );
 
 localparam regop_width=44;
@@ -65,6 +68,9 @@ wire up_rr_op   = up_sl_rr  & update_op_I;
 wire up_ssg_op  = up_ssgeg  & update_op_I;
 
 always @(*)
+    if( ss )
+        regop_in = ss_din;
+    else
     regop_in = {
         up_tl_op    ? din[6:0]    : shift_in[43:37],      // 7 
         up_dt1_op   ? din[6:4]    : shift_in[36:34],      // 3 

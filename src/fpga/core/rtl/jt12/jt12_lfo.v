@@ -69,7 +69,12 @@ module jt12_lfo(
 	input				lfo_rst,
 	input				lfo_en,
 	input		[2:0]	lfo_freq,
-	output	reg	[6:0]	lfo_mod		// 7-bit width according to spritesmind.net
+	output	reg	[6:0]	lfo_mod,	// 7-bit width according to spritesmind.net
+	// Save states: held in scan mode, on the chain
+	input				ss,
+	input				ss_gsh,
+	input				ss_gi,
+	output				ss_go
 );
 
 reg [6:0] cnt, limit;
@@ -86,10 +91,16 @@ always @(*)
 		3'd7: limit = 7'd5;
 	endcase
 
-always @(posedge clk) 
-	if( rst || !lfo_en )
+wire [13:0] ss_gv = { lfo_mod, cnt };
+wire [13:0] ss_gn = { ss_gv[12:0], ss_gi };
+assign ss_go = ss_gv[13];
+
+always @(posedge clk)
+	if( ss_gsh )
+		{ lfo_mod, cnt } <= ss_gn;
+	else if( (rst || !lfo_en) && !ss )	// (not in scan mode: the chain's bits pass through)
 		{ lfo_mod, cnt } <= 14'd0;
-	else if( clk_en && zero) begin
+	else if( clk_en && zero && !ss ) begin
 		if( cnt == limit ) begin
 			cnt <= 7'd0;
 			lfo_mod <= lfo_mod + 1'b1;

@@ -31,17 +31,27 @@ module jt10_adpcm_div #(parameter dw=16)(
     input      [dw-1:0] b,
     output reg [dw-1:0] d,
     output reg [dw-1:0] r,
-    output              working
+    output              working,
+    // Save states: on the chain (jt12_pcm_interpol's)
+    input               ss_gsh,
+    input               ss_gi,
+    output              ss_go
 );
 
 reg  [dw-1:0] cycle;
 assign working = cycle[0];
+
+wire [3*dw-1:0] ss_gv = { cycle, d, r };
+wire [3*dw-1:0] ss_gn = { ss_gv[3*dw-2:0], ss_gi };
+assign ss_go = ss_gv[3*dw-1];
 
 wire [dw:0] sub = { r[dw-2:0], d[dw-1] } - b;  
 
 always @(posedge clk or negedge rst_n)
     if( !rst_n ) begin
         cycle <= 'd0;
+    end else if( ss_gsh ) begin
+        { cycle, d, r } <= ss_gn;
     end else if(cen) begin
         if( start ) begin
             cycle <= ~16'd0;
