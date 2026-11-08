@@ -35,6 +35,8 @@ vip
 *.spd
 *.summary
 *.txt
+# FX68K's own notes and licence, not a report
+!core/rtl/FX68K/fx68k.txt
 *.log
 *.xml
 *~
