@@ -134,7 +134,10 @@ if [ "${1:-}" = "--against" ]; then
   build old "$2" & build new "" & wait
   # (an older core_top.sv with no Analogizer: its part of the session left out of both)
   extra=(); grep -q pocket_analogizer "$OUT/old/core_top.sv" || extra=(+no_anz)
+  # (nor one from before an emulator's short save was put in place)
+  grep -q save_packing "$OUT/old/core_top.sv" || extra+=(+no_emu_save)
   # (the checks are this tree's, so a revision that does otherwise on purpose fails them: the hashes say where)
+  echo ${extra[@]+"${extra[@]}"} > "$OUT/new/plusargs"   # (tools/top-mutants.py runs as new did)
   run old ${extra[@]+"${extra[@]}"} || true
   run new ${extra[@]+"${extra[@]}"}
   # (sorted: two domains' lines at the same moment come in the order the model runs them)

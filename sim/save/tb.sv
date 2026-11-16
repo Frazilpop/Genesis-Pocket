@@ -14,6 +14,8 @@ module tb;
   reg        req = 0;
   reg [15:0] req_id = 0;
   reg [31:0] req_size = 0;
+  reg        allcomplete = 0, cart_download = 0;
+  wire       busy;
 
   wire        save_wr;
   wire [16:0] save_wr_addr, save_rd_addr;
@@ -36,6 +38,7 @@ module tb;
   save_layout sl (
     .clk_74a(clk_74a), .clk_sys(clk_sys),
     .dataslot_requestwrite(req), .dataslot_requestwrite_id(req_id), .dataslot_requestwrite_size(req_size),
+    .slots_done(allcomplete), .game_loading(cart_download), .busy(busy),
     .wr(save_wr), .wr_addr(save_wr_addr), .wr_data(save_wr_data),
     .rd_addr(save_rd_addr), .rd_data(save_rd_data),
     .ram_we(ram_we), .ram_addr(ram_addr), .ram_di(ram_di), .ram_do(ram_do));
@@ -62,6 +65,10 @@ module tb;
     $readmemh(in_path, file_in, 0, size - 1);
     tick74(20);
 
+    // the game comes in first (its writes aren't modelled)
+    cart_download = 1; tick74(20); cart_download = 0;
+    tick74(20);
+
     // 0x0082 for the save slot, then the file a 32-bit word at a time
     req_id = 16'd10; req_size = size; req = 1; tick74(4); req = 0;
     tick74(20);
@@ -72,6 +79,15 @@ module tb;
       if (i % 16384 == 0) $display("load %0d of %0d", i, size);
     end
     tick74(100);
+
+    // Data slot access all complete: a short emulator's file is put in place, the
+    // console held meanwhile
+    allcomplete = 1;
+    tick74(400);
+    // the repack is 4 clocks of clk_sys a RAM word, about 180,000 of clk_74a in all
+    for (i = 0; busy && i < 400; i++) tick74(1000);
+    if (busy) $display("still packing after %0d clocks of clk_74a", i * 1000);
+    tick74(20);
 
     fd = $fopen(ram_path, "w");
     for (i = 0; i < 32768; i++) $fwrite(fd, "%02x\n%02x\n", ram[i][7:0], ram[i][15:8]);

@@ -37,7 +37,9 @@ MUTANTS = [
     ("a Memory's timing kept past Reset Core", "cart_download || reset_core_s || &v30_time", "cart_download || &v30_time"),
     ("a Memory's timing kept for the next game", "cart_download || reset_core_s || &v30_time", "reset_core_s || &v30_time"),
     ("a load let go with the clock changing", ".pal_hold(pal_hold),", ".pal_hold(1'b0),"),
-    ('reset ignores PAL hold', ' | region_set | pal_hold_s;', ' | region_set;'),
+    ('reset ignores PAL hold', ' | region_set | pal_hold_s | save_packing;', ' | region_set | save_packing;'),
+    ('console runs while a save is packed', ' | pal_hold_s | save_packing;', ' | pal_hold_s;'),
+    ('no save packed', '.game_loading(cart_download),', ".game_loading(1'b0),"),
     ('load not held by save state', '| ss_hold_reset),', '),'),
     ('state size wrong', "32'h0003_4000", "32'h0003_8000"),
     ('long file not following', 'ss_long_file <= svp_quirk;', ''),
@@ -80,7 +82,9 @@ src = open(os.path.join(ROOT, CORE, 'core_top.sv'), encoding='latin-1').read()
 gone = [what for what, a, _ in MUTANTS if a not in src]   # a mistake whose line has since changed: say so before an hour's run
 if gone:
     sys.exit('top-mutants.py: not in core_top.sv any more: ' + '; '.join(gone))
-good = sorted(open(os.path.join(ROOT, 'build/top-sim/new/hash.log')).read().split('\n'))  # (order within a moment: the model's)
+good = sorted(open(os.path.join(ROOT, 'build/top-sim/new/hash.log')).read().split('\n'))
+# the parts of the session that run left out of it (top-test.sh --against: an older revision's), so of these too
+plus = open(os.path.join(ROOT, 'build/top-sim/new/plusargs')).read().split() if os.path.exists(os.path.join(ROOT, 'build/top-sim/new/plusargs')) else []  # (order within a moment: the model's)
 files = ['core_bridge_cmd.v', 'data_loader.sv', 'data_unloader.sv', 'sound_i2s.sv', 'sync_fifo.sv', 'save_layout.sv',
          'state_bridge.sv', 'video_hold.sv', 'pal_clock.sv', 'rtl/sdram.sv', 'rtl/cofi.sv', 'rtl/lightgun.sv',
          'pocket_analogizer.sv'] + ['../analogizer/' + f for f in (
@@ -108,7 +112,7 @@ def one(args):
                        cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
         return what, 'did not build', r.stdout[-300:]
-    r = subprocess.run([d + '/obj/Vtb', f'+log={d}/hash.log'], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run([d + '/obj/Vtb', f'+log={d}/hash.log', *plus], cwd=ROOT, capture_output=True, text=True)
     fails = re.findall(r'^FAILED at \d+ ps: (.*)$', r.stdout, re.M)
     same = sorted(open(d + '/hash.log').read().split('\n')) == good if os.path.exists(d + '/hash.log') else False
     return what, 'SEEN' if fails or not same else 'NOT SEEN', (fails[0] if fails else 'hashes differ' if not same else '')

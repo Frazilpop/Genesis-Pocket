@@ -195,6 +195,43 @@ task automatic test_save_128k();
     ok(r == 32'd131072, $sformatf("the data table says 128 KB for the save: %0d", r));
 endtask
 
+// An emulator's save: a byte at each address, cut short after its last byte that isn't
+// FF (Genesis Plus GX), so 16,382 bytes for 8 KB of a game's RAM on odd bytes. The Pocket
+// lets the core out of reset straight after the slots; the console waits until the RAM
+// holds the odd bytes in order, FF after, and the last bridge word's padding nowhere.
+task automatic test_save_emulator();
+    logic [15:0] code;
+    int bad = 0, n = 0;
+    localparam int SZ = 16382;
+    host(16'h0010, 0, 0, code);
+    bwr(32'hF8002000, 32'd0); bwr(32'hF8002004, rom_size); bwr(32'hF8002008, 32'd10);
+    host(16'h0082, 32'd0, rom_size, code);
+    write_rom();
+    tick(200);
+    host(16'h0082, 32'd10, SZ, code);
+    ok(code == 0, "an emulator's save: its slot is granted");
+    for (int i = 0; i < SZ; i += 4) begin
+        automatic logic [7:0] b1 = 8'((i / 2) * 37 + 5), b3 = 8'((i / 2 + 1) * 37 + 5);
+        bwr(32'h60000000 + i, {8'hFF, b1, i + 2 < SZ ? 8'hFF : 8'hA5, i + 3 < SZ ? b3 : 8'hA5}, 41);
+    end
+    tick(200);
+    host(16'h008F, 0, 0, code);
+    host(16'h0011, 0, 0, code);
+    tick(200);
+    ok(!s.reset_n, "an emulator's save: the console waits while it is put in place");
+    while (!s.reset_n && n < 1000000) begin tick(100); n += 100; end
+    ok(s.reset_n, $sformatf("an emulator's save: the console goes, %0d clocks after Reset Exit", n));
+    for (int i = 0; i < 32768; i++) begin
+        automatic logic [7:0] lo = 2 * i < 8191 ? 8'((2 * i) * 37 + 5) : 8'hFF;
+        automatic logic [7:0] hi = 2 * i + 1 < 8191 ? 8'((2 * i + 1) * 37 + 5) : 8'hFF;
+        if (ic.system.bram[i] != {hi, lo}) begin
+            bad++;
+            if (bad < 4) $display("emulator's save, word %0d: %h, wanted %h%h", i, ic.system.bram[i], hi, lo);
+        end
+    end
+    ok(bad == 0, $sformatf("an emulator's save: the game's bytes in order, FF after (%0d words wrong)", bad));
+endtask
+
 task automatic test_save_64k();
     logic [15:0] code;
     int bad = 0;
@@ -548,6 +585,11 @@ task automatic run();
     test_state_timing();
     set(`A_REGION, 0); set(`A_PAL_60, 0);
     $display("State timing done, %0d ps", $time);
+    // an emulator's short save, which a revision before 1.0.1 takes back to back (+no_emu_save)
+    if (!$test$plusargs("no_emu_save")) begin
+        test_save_emulator();
+        $display("Emulator's save done, %0d ps", $time);
+    end
     // last, as a revision with no Analogizer has none of it (top-test.sh --against: +no_anz)
     `ifdef ANZ
     if (!$test$plusargs("no_anz")) begin

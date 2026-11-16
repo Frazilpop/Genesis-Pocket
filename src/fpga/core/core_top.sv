@@ -558,6 +558,8 @@ wire        bram_we;
 wire [14:0] bram_addr;
 wire [15:0] bram_to_ram;
 wire [15:0] bram_from_ram;
+wire        save_packing;   // an emulator's short .sav being put in place: the console waits
+wire        cart_download;
 
 data_loader #(
     .ADDRESS_MASK_UPPER_4(4'h6),
@@ -605,6 +607,10 @@ save_layout save_layout (
     .dataslot_requestwrite_id(dataslot_requestwrite_id),
     .dataslot_requestwrite_size(dataslot_requestwrite_size),
 
+    .slots_done(dataslot_allcomplete),
+    .game_loading(cart_download),
+    .busy(save_packing),
+
     .wr(save_wr),
     .wr_addr(save_wr_addr),
     .wr_data(save_wr_data),
@@ -629,7 +635,6 @@ reg  slots_loading = 0;
 always @(posedge clk_74a)
     slots_loading <= dataslot_requestwrite | (slots_loading & ~dataslot_allcomplete);
 
-wire cart_download;
 synch_3 cart_download_s (slots_loading && bridge_addr[31:28] == 4'h1, cart_download, clk_sys);
 
 wire        ioctl_wr;
@@ -1042,7 +1047,7 @@ lightgun lightgun
 wire in_menu, pal_hold_s, reset_core_s;
 synch_3 #(.WIDTH(3)) console_s ({osnotify_inmenu, pal_hold, reset_delay != 0}, {in_menu, pal_hold_s, reset_core_s}, clk_sys);
 
-wire reset = ~reset_n | cart_download | region_set | pal_hold_s;
+wire reset = ~reset_n | cart_download | region_set | pal_hold_s | save_packing;
 
 // A game that turns on PAL's 240 lines at 60 Hz. The VDP's line counter never reloads then,
 // as on a real NTSC console, so a frame is 512 lines, 30.85 a second, and the Pocket shows

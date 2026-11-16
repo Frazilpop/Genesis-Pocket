@@ -8,7 +8,7 @@ OUT=build/save-sim
 CORE=src/fpga/core
 mkdir -p "$OUT"
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module tb -Mdir "$OUT/obj" \
-  sim/save/tb.sv sim/save/dcfifo.sv $CORE/data_loader.sv $CORE/data_unloader.sv $CORE/save_layout.sv \
+  sim/save/tb.sv sim/save/dcfifo.sv src/fpga/apf/common.v $CORE/data_loader.sv $CORE/data_unloader.sv $CORE/save_layout.sv \
   > "$OUT/verilator.log" 2>&1 || { tail -30 "$OUT/verilator.log"; exit 1; }
 
 [ $# -eq 0 ] && set -- "/Volumes/Untitled/Saves/genesis/common"
