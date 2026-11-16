@@ -28,8 +28,8 @@ if ram != want:
     fails.append('RAM byte %d is %02x, should be %02x' % (k, ram[k], want[k]))
 if len(out) != 131072:
     fails.append('wrote %d bytes back, not 131072' % len(out))
-elif out[1::2] != ram or out[0::2] != ram:
-    fails.append('the file back is not the RAM on both bytes of each word')
+elif out[1::2] != ram or out[0::2] != b'\xff' * 65536:
+    fails.append('the file back is not the RAM on the odd bytes, FF on the even')
 if (emu or not packed) and out[1:len(data):2] != data[1::2]:
     fails.append("the file back's odd bytes differ from the file's")
 if len(out) == 131072:
@@ -40,6 +40,25 @@ if len(out) == 131072:
                    check=True, stdout=subprocess.DEVNULL) if open(hin.replace('in.hex', 'back.hex'), 'w').write(''.join('%02x\n' % b for b in out)) else None
     if bytes(int(x, 16) for x in open(hram).read().split()) != ram:
         fails.append('the file back, loaded again, is not the same RAM')
+if len(out) == 131072:
+    # to an emulator and back: RetroArch loads the first 64 KB (Genesis Plus GX's sram.sram, a
+    # byte per address), the game writes some odd bytes, and the file is cut after its last
+    # byte that isn't FF. Loaded here again, the RAM is what the game left there.
+    img = bytearray(out[:65536])
+    for k in range(0, 32768, 37):
+        img[2 * k + 1] ^= 0x5a
+    emu_file = bytes(img).rstrip(b'\xff')
+    if emu_file:
+        hrt = hin.replace('in.hex', 'rt.hex')
+        open(hrt, 'w').write(''.join('%02x\n' % b for b in emu_file))
+        subprocess.run([sim, '+in=' + hrt, '+size=%d' % len(emu_file), '+out=' + hout, '+ram=' + hram],
+                       check=True, stdout=subprocess.DEVNULL)
+        got = bytes(int(x, 16) for x in open(hram).read().split())
+        want_rt = bytes(emu_file[2 * n + 1] if 2 * n + 1 < len(emu_file) else 0xff for n in range(65536))
+        if got != want_rt:
+            k = next(i for i in range(65536) if got[i] != want_rt[i])
+            fails.append('through an emulator and back (%d bytes): RAM byte %d is %02x, should be %02x'
+                         % (len(emu_file), k, got[k], want_rt[k]))
 print(('FAIL ' if fails else 'ok   ') + ('emulator' if emu else '64 KB' if packed else '128 KB') + '  ' + name)
 for f in fails:
     print('     ' + f)

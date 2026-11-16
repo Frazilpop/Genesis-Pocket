@@ -187,9 +187,9 @@ task automatic test_save_128k();
     for (int i = 0; i < 131072; i += 4) begin
         automatic logic [15:0] ram = ic.system.bram[i / 4];
         brd(32'h60000000 + i, r, 60);
-        if (r != {{2{ram[7:0]}}, {2{ram[15:8]}}}) begin bad++; if (bad < 4) $display("save out at %h: %h, wanted %h", i, r, {{2{ram[7:0]}}, {2{ram[15:8]}}}); end
+        if (r != {8'hFF, ram[7:0], 8'hFF, ram[15:8]}) begin bad++; if (bad < 4) $display("save out at %h: %h, wanted %h", i, r, {8'hFF, ram[7:0], 8'hFF, ram[15:8]}); end
     end
-    ok(bad == 0, $sformatf("the save RAM comes back as 128 KB, each byte on its pair of words (%0d wrong)", bad));
+    ok(bad == 0, $sformatf("the save RAM comes back as 128 KB, each byte on the odd byte of its word, FF on the even (%0d wrong)", bad));
     // the size the Pocket writes it at
     brd(32'hF800200C, r); brd(32'hF800200C, r);
     ok(r == 32'd131072, $sformatf("the data table says 128 KB for the save: %0d", r));

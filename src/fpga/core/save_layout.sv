@@ -4,8 +4,10 @@
 // works in both: the 128 KB the save RAM spans in the 68000's map
 // (0x200000-0x21FFFF), each byte at its own address. The RAM here (system.sv)
 // is a byte per 68000 word, 64 KB, so a RAM byte is the odd byte of a file
-// word, the one a game reads. It goes back out on both bytes of its word, as
-// a read here returns it.
+// word, the one a game reads. It goes back out on that byte, the even byte
+// FF, as Spiritualized's core and Genesis Plus GX leave it for a game with its
+// RAM on odd bytes: so the file goes to an emulator and back, the even bytes
+// still all FF whatever the game wrote there.
 //
 // A file of 64 KB or less is one of two things, told apart by what is in it:
 //
@@ -167,6 +169,6 @@ assign ram_addr = pk_port ? pk_addr :
                   ~ram_we ? rd_addr[16:2] :
                   back_to_back ? wr_addr[15:1] : wr_addr[16:2];
 
-assign rd_data  = rd_addr[1] ? {2{ram_do[15:8]}} : {2{ram_do[7:0]}};
+assign rd_data  = rd_addr[1] ? {ram_do[15:8], 8'hFF} : {ram_do[7:0], 8'hFF};
 
 endmodule
