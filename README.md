@@ -26,6 +26,7 @@ Games saves are stored `Saves/genesis/common/<game>.sav`
 
 - Saves are written as 128 KB files. This is the same layout as the Spiritualized Genesis core, so game saves are compatible between the two cores
 - 64 KB saves are read too. Note that these are then written back in the 128 KB format.
+- Emulator saves are read, and this core's saves can be copied back and forth. BlastEm's saves and serial EEPROM saves are laid out differently and need converting first.
 - Cartridges with a serial EEPROM save chip store data in the same `.sav`, in the same layout.
 
 Your saves are worth backing up before you use them with a new
